@@ -138,10 +138,7 @@ Solver::Solver()
           propagation_budget(-1),
           asynch_interrupt(false) {}
 
-Solver::~Solver()
-{
-}
-
+Solver::~Solver() = default;
 
 //=================================================================================================
 // Minor methods:

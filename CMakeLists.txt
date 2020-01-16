@@ -38,7 +38,6 @@ add_library(libminisat STATIC
     minisat/mtl/Alloc.h
     minisat/mtl/Heap.h
     minisat/mtl/IntTypes.h
-    minisat/mtl/Map.h
     minisat/mtl/Queue.h
     minisat/mtl/Sort.h
     minisat/mtl/Vec.h
@@ -107,7 +106,7 @@ set_target_properties(${targets}
 
 foreach (target ${targets})
     if ( CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU" )
-        target_compile_options( ${target} PRIVATE -Wall -Wextra )
+        target_compile_options( ${target} PRIVATE -Wall -Wextra -Werror)
     endif()
     if ( CMAKE_CXX_COMPILER_ID MATCHES "MSVC" )
         target_compile_options( ${target} PRIVATE /W4 /wd4267 )

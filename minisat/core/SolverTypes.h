@@ -23,6 +23,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #ifndef Minisat_SolverTypes_h
 #define Minisat_SolverTypes_h
 
+#include <vector>
 #include <cassert>
 #include <vector>
 
@@ -324,66 +325,81 @@ public:
     }
 };
 
-
 //=================================================================================================
 // OccLists -- a class for maintaining occurence lists with lazy deletion:
 
-template<class Idx, class Vec, class Deleted>
-class OccLists
-{
-    vec<Vec>  occs;
-    vec<char> dirty;
-    vec<Idx>  dirties;
-    Deleted   deleted;
+template <class Idx, class Vec, class Deleted>
+class OccLists {
+    std::vector<Vec> m_occs;
+    vec<bool> m_dirty;
+    vec<Idx> m_dirties;
+    Deleted m_deleted;
 
- public:
-    OccLists(const Deleted& d) : deleted(d) {}
+public:
+    OccLists(const Deleted& d) : m_deleted{d} {}
 
-    void  init      (const Idx& idx){ occs.growTo(toInt(idx)+1); dirty.growTo(toInt(idx)+1, 0); }
-    // Vec&  operator[](const Idx& idx){ return occs[toInt(idx)]; }
-    Vec&  operator[](const Idx& idx){ return occs[toInt(idx)]; }
-    Vec&  lookup    (const Idx& idx){ if (dirty[toInt(idx)]) clean(idx); return occs[toInt(idx)]; }
-
-    void  cleanAll  ();
-    void  clean     (const Idx& idx);
-    void  smudge    (const Idx& idx){
-        if (dirty[toInt(idx)] == 0){
-            dirty[toInt(idx)] = 1;
-            dirties.push(idx);
+    void init(const Idx& idx) {
+        size_t size = toInt(idx) + 1;
+        if (size > m_occs.size()) {
+            m_occs.resize(size);
+            m_dirty.growTo(size);
         }
     }
 
-    void  clear(bool free = true){
-        occs   .clear(free);
-        dirty  .clear(free);
-        dirties.clear(free);
+    // Vec&  operator[](const Idx& idx){ return occs[toInt(idx)]; }
+    Vec& operator[](const Idx& idx) { return m_occs[toInt(idx)]; }
+    Vec& lookup(const Idx& idx) {
+        if (m_dirty[toInt(idx)])
+            clean(idx);
+        return m_occs[toInt(idx)];
+    }
+
+    //! remove deleted items in the list of idx
+    void clean(const Idx& idx);
+    void cleanAll();
+    void smudge(const Idx& idx) {
+        if (m_dirty[toInt(idx)] == 0) {
+            m_dirty[toInt(idx)] = 1;
+            m_dirties.push(idx);
+        }
+    }
+
+    void clear(bool free = true) {
+        if (free) {
+            std::vector<Vec> t;
+            m_occs.swap(t);
+        } else {
+            m_occs.clear();
+        }
+        m_dirty.clear(free);
+        m_dirties.clear(free);
     }
 };
 
-
-template<class Idx, class Vec, class Deleted>
-void OccLists<Idx,Vec,Deleted>::cleanAll()
-{
-    for (int i = 0; i < dirties.size(); i++)
-        // Dirties may contain duplicates so check here if a variable is already cleaned:
-        if (dirty[toInt(dirties[i])])
-            clean(dirties[i]);
-    dirties.clear();
+template <class Idx, class Vec, class Deleted>
+void OccLists<Idx, Vec, Deleted>::cleanAll() {
+    for (Idx i : m_dirties) {
+        // Dirties may contain duplicates so check here if a variable is already
+        // cleaned:
+        if (m_dirty[toInt(i)]) {
+            clean(i);
+        }
+    }
+    m_dirties.clear();
 }
 
-
-template<class Idx, class Vec, class Deleted>
-void OccLists<Idx,Vec,Deleted>::clean(const Idx& idx)
-{
-    Vec& vec = occs[toInt(idx)];
-    int  i, j;
-    for (i = j = 0; i < vec.size(); i++)
-        if (!deleted(vec[i]))
+template <class Idx, class Vec, class Deleted>
+void OccLists<Idx, Vec, Deleted>::clean(const Idx& idx) {
+    Vec& vec = m_occs[toInt(idx)];
+    int i, j;
+    for (i = j = 0; i < vec.size(); i++) {
+        if (!m_deleted(vec[i])) {
             vec[j++] = vec[i];
+        }
+    }
     vec.shrink(i - j);
-    dirty[toInt(idx)] = 0;
+    m_dirty[toInt(idx)] = 0;
 }
-
 
 /*_________________________________________________________________________________________________
 |
