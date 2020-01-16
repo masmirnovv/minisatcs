@@ -17,9 +17,9 @@ DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
 OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 **************************************************************************************************/
 
-#include "mtl/Sort.h"
-#include "utils/Options.h"
-#include "utils/ParseUtils.h"
+#include "minisat/mtl/Sort.h"
+#include "minisat/utils/Options.h"
+#include "minisat/utils/ParseUtils.h"
 
 using namespace Minisat;
 
@@ -35,18 +35,24 @@ void Minisat::parseOptions(int& argc, char** argv, bool strict)
                 printUsageAndExit(argc, argv, true);
         } else {
             bool parsed_ok = false;
-        
+
             for (int k = 0; !parsed_ok && k < Option::getOptionList().size(); k++){
                 parsed_ok = Option::getOptionList()[k]->parse(argv[i]);
 
                 // fprintf(stderr, "checking %d: %s against flag <%s> (%s)\n", i, argv[i], Option::getOptionList()[k]->name, parsed_ok ? "ok" : "skip");
             }
 
-            if (!parsed_ok)
-                if (strict && match(argv[i], "-"))
-                    fprintf(stderr, "ERROR! Unknown flag \"%s\". Use '--%shelp' for help.\n", argv[i], Option::getHelpPrefixString()), exit(1);
-                else
+            if (!parsed_ok) {
+                if (strict && match(argv[i], "-")) {
+                    fprintf(stderr,
+                            "ERROR! Unknown flag \"%s\". Use '--%shelp' for "
+                            "help.\n",
+                            argv[i], Option::getHelpPrefixString()),
+                            exit(1);
+                } else {
                     argv[j++] = argv[i];
+                }
+            }
         }
     }
 

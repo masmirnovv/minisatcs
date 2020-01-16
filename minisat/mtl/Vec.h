@@ -24,8 +24,8 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #include <assert.h>
 #include <new>
 
-#include "mtl/IntTypes.h"
-#include "mtl/XAlloc.h"
+#include "minisat/mtl/IntTypes.h"
+#include "minisat/mtl/XAlloc.h"
 
 namespace Minisat {
 
@@ -41,9 +41,9 @@ class vec {
     int cap;
 
     // Don't allow copying (error prone):
-    vec<T>&  operator = (vec<T>& other) { assert(0); return *this; }
-             vec        (vec<T>& other) { assert(0); }
-             
+    vec<T>&  operator = (const vec<T>& ) { assert(0); return *this; }
+             vec        (const vec<T>& ) { assert(0); }
+
     // Helpers for calculating next capacity:
     static inline int  imax   (int x, int y) { int mask = (y-x) >> (sizeof(int)*8-1); return (x&mask) + (y&(~mask)); }
     //static inline void nextCap(int& cap){ cap += ((cap >> 1) + 2) & ~1; }
@@ -96,8 +96,11 @@ template<class T>
 void vec<T>::capacity(int min_cap) {
     if (cap >= min_cap) return;
     int add = imax((min_cap - cap + 1) & ~1, ((cap >> 1) + 2) & ~1);   // NOTE: grow by approximately 3/2
-    if (add > INT_MAX - cap || ((data = (T*)::realloc(data, (cap += add) * sizeof(T))) == NULL) && errno == ENOMEM)
+    if (add > INT_MAX - cap ||
+        (((data = (T*)::realloc(data, (cap += add) * sizeof(T))) == NULL) &&
+         errno == ENOMEM)) {
         throw OutOfMemoryException();
+    }
  }
 
 
