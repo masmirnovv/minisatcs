@@ -24,6 +24,10 @@ find_package(ZLIB)
 
 include(GNUInstallDirs)
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 add_library(libminisat STATIC
     # Impl files
     minisat/core/Solver.cc
@@ -48,14 +52,15 @@ add_library(libminisat STATIC
     minisat/simp/SimpSolver.h
 )
 
-# Keep the library named as either libminisat.a or minisat.lib
-# While having the target's logical name be distinct from minisat (the binary)
 set_target_properties(libminisat
     PROPERTIES
-      OUTPUT_NAME "minisat"
+        # Keep the library named as either libminisat.a or minisat.lib While
+        # having the target's logical name be distinct from minisat (the
+        # binary)
+        OUTPUT_NAME "minisat"
 
-      # build PIC binary so .a could be linked into a shared library
-      POSITION_INDEPENDENT_CODE ON
+        # build PIC binary so .a could be linked into a shared library
+        POSITION_INDEPENDENT_CODE ON
 )
 
 ## Add a namespace alias.
@@ -114,8 +119,10 @@ foreach (target ${targets})
     endif()
 endforeach()
 
+# fix compile options
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -O3")
+string(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
 
 ###############
 # Testing
@@ -147,6 +154,10 @@ if (MINISAT_BUILD_TESTING AND BUILD_TESTING)
         set_tests_properties("integration:${INTEGRATION_TEST}" PROPERTIES
             TIMEOUT 30
         ) # 30s timeout
+
+        if ("${INTEGRATION_TEST}" MATCHES "(SAT|UNSAT)/ineq/.*")
+            continue()
+        endif()
 
         add_test(NAME "integration_simp:${INTEGRATION_TEST}"
             COMMAND minisat-simp -verb=0 "tests/inputs/${INTEGRATION_TEST}"

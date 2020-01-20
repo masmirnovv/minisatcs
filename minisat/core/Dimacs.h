@@ -31,17 +31,55 @@ namespace Minisat {
 //=================================================================================================
 // DIMACS Parser:
 
-template<class B, class Solver>
-static void readClause(B& in, Solver& S, vec<Lit>& lits) {
-    int     parsed_lit, var;
+template <class B, class Solver>
+static bool readClause(B& in, Solver& S, vec<Lit>& lits) {
     lits.clear();
-    for (;;){
-        parsed_lit = parseInt(in);
-        if (parsed_lit == 0) break;
-        var = abs(parsed_lit)-1;
-        while (var >= S.nVars()) S.newVar();
-        lits.push( (parsed_lit > 0) ? mkLit(var) : ~mkLit(var) );
+
+    auto get_lit = [&S](int v) -> Lit {
+        int var = abs(v) - 1;
+        while (var >= S.nVars())
+            S.newVar();
+        return (v > 0) ? mkLit(var) : ~mkLit(var);
+    };
+
+    for (;;) {
+        skipWhitespace(in);
+        if (*in == '>' || *in == '<') {
+            // parse inequalities
+            char op = *in;
+            ++in;
+            if (*in != '=') {
+                fprintf(stderr,
+                        "PARSE ERROR! Unexpected char in inequality: %c\n",
+                        *in),
+                        exit(3);
+            }
+            ++in;
+            int bound = parseInt(in);
+            skipWhitespace(in);
+            if (*in != '#') {
+                fprintf(stderr,
+                        "PARSE ERROR! Unexpected char in inequality assign: "
+                        "%c\n",
+                        *in),
+                        exit(3);
+            }
+            ++in;
+            Lit dst = get_lit(parseInt(in));
+            if (op == '<') {
+                S.addLeqAssign_(lits, bound, dst);
+            } else {
+                S.addGeqAssign_(lits, bound, dst);
+            }
+            return false;
+        }
+
+        int parsed_lit = parseInt(in);
+        if (parsed_lit == 0)
+            break;
+        lits.push(get_lit(parsed_lit));
     }
+    return true;
 }
 
 template<class B, class Solver>
@@ -67,8 +105,9 @@ static void parse_DIMACS_main(B& in, Solver& S) {
             skipLine(in);
         else{
             cnt++;
-            readClause(in, S, lits);
-            S.addClause_(lits); }
+            if (readClause(in, S, lits)) {
+                S.addClause_(lits);
+            } }
     }
     if (vars != S.nVars())
         fprintf(stderr, "WARNING! DIMACS header mismatch: wrong number of variables.\n");

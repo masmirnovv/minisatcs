@@ -152,7 +152,13 @@ int main(int argc, char** argv)
         signal(SIGINT, SIGINT_interrupt);
         signal(SIGXCPU,SIGINT_interrupt);
 
-        if (!S.simplify()){
+        bool simplify_result = S.simplify();
+        if (S.verbosity > 0) {
+            printf("|  Simplified: (result=%d)%12d                                         |\n", simplify_result,
+                   S.nClauses());
+        }
+
+        if (!simplify_result) {
             if (res != NULL) fprintf(res, "%s\n", MSG_UNSAT), fclose(res);
             if (S.verbosity > 0){
                 printf("===============================================================================\n");

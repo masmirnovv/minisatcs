@@ -39,7 +39,10 @@ class RegionAllocator
 
     void capacity(uint32_t min_cap);
 
- public:
+    RegionAllocator(const RegionAllocator&) = delete;
+    RegionAllocator& operator=(const RegionAllocator&) = delete;
+
+public:
     // TODO: make this a class for better type-checking?
     typedef uint32_t Ref;
     enum { Ref_Undef = UINT32_MAX };
@@ -56,7 +59,7 @@ class RegionAllocator
     uint32_t size      () const      { return sz; }
     uint32_t wasted    () const      { return wasted_; }
 
-    Ref      alloc     (int size); 
+    Ref      alloc     (int size);
     void     free      (int size)    { wasted_ += size; }
 
     // Deref, Load Effective Address (LEA), Inverse of LEA (AEL):
@@ -65,8 +68,8 @@ class RegionAllocator
 
     T*       lea       (Ref r)       { assert(r >= 0 && r < sz); return &memory[r]; }
     const T* lea       (Ref r) const { assert(r >= 0 && r < sz); return &memory[r]; }
-    Ref      ael       (const T* t)  { assert((void*)t >= (void*)&memory[0] && (void*)t < (void*)&memory[sz-1]);
-        return  (Ref)(t - &memory[0]); }
+    Ref      ael       (const T* t)  { assert(t >= &memory[0] && t < &memory[sz]);
+        return  static_cast<Ref>(t - &memory[0]); }
 
     void     moveTo(RegionAllocator& to) {
         if (to.memory != NULL) ::free(to.memory);
@@ -109,14 +112,14 @@ void RegionAllocator<T>::capacity(uint32_t min_cap)
 template<class T>
 typename RegionAllocator<T>::Ref
 RegionAllocator<T>::alloc(int size)
-{ 
+{
     // printf("ALLOC called (this = %p, size = %d)\n", this, size); fflush(stdout);
     assert(size > 0);
     capacity(sz + size);
 
     uint32_t prev_sz = sz;
     sz += size;
-    
+
     // Handle overflow:
     if (sz < prev_sz)
         throw OutOfMemoryException();

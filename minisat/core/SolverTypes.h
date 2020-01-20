@@ -23,8 +23,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #ifndef Minisat_SolverTypes_h
 #define Minisat_SolverTypes_h
 
-#include <vector>
 #include <cassert>
+#include <utility>
 #include <vector>
 
 #include "minisat/mtl/Alg.h"
@@ -46,9 +46,6 @@ typedef int Var;
 struct Lit {
     int x;
 
-    // Use this as a constructor:
-    friend Lit mkLit(Var var, bool sign);
-
     bool operator==(Lit p) const { return x == p.x; }
     bool operator!=(Lit p) const { return x != p.x; }
     bool operator<(Lit p) const {
@@ -56,36 +53,36 @@ struct Lit {
     }  // '<' makes p, ~p adjacent in the ordering.
 };
 
-inline Lit mkLit(Var var, bool sign = false) {
+static inline Lit mkLit(Var var, bool sign = false) {
     Lit p;
     p.x = var + var + (int)sign;
     return p;
 }
-inline Lit operator~(Lit p) {
+static inline Lit operator~(Lit p) {
     Lit q;
     q.x = p.x ^ 1;
     return q;
 }
-inline Lit operator^(Lit p, bool b) {
+static inline Lit operator^(Lit p, bool b) {
     Lit q;
     q.x = p.x ^ (unsigned int)b;
     return q;
 }
-inline bool sign(Lit p) {
+static inline bool sign(Lit p) {
     return p.x & 1;
 }
-inline int var(Lit p) {
+static inline int var(Lit p) {
     return p.x >> 1;
 }
 
 // Mapping Literals to and from compact integers suitable for array indexing:
-inline int toInt(Var v) {
+static inline int toInt(Var v) {
     return v;
 }
-inline int toInt(Lit p) {
+static inline int toInt(Lit p) {
     return p.x;
 }
-inline Lit toLit(int i) {
+static inline Lit toLit(int i) {
     Lit p;
     p.x = i;
     return p;
@@ -94,8 +91,8 @@ inline Lit toLit(int i) {
 // const Lit lit_Undef = mkLit(var_Undef, false);  // }- Useful special
 // constants. const Lit lit_Error = mkLit(var_Undef, true );  // }
 
-const Lit lit_Undef = {-2};  // }- Useful special constants.
-const Lit lit_Error = {-1};  // }
+static constexpr Lit lit_Undef = {-2};  // }- Useful special constants.
+static constexpr Lit lit_Error = {-1};  // }
 
 //=================================================================================================
 // Lifted booleans:
@@ -143,6 +140,12 @@ public:
         return lbool(v);
     }
 
+    constexpr bool val_is(bool b) const {
+        return value == (static_cast<uint8_t>(b) ^ 1);
+    }
+
+    constexpr bool is_not_undef() const { return !(value & 2); }
+
     friend int toInt(lbool l);
     friend lbool toLbool(int v);
 };
@@ -153,41 +156,113 @@ inline lbool toLbool(int v) {
     return lbool((uint8_t)v);
 }
 
+/* ========================== LeqStatus =========================== */
+//! Clause reference type
+using CRef = RegionAllocator<uint32_t>::Ref;
+
+//! status for an LEQ clause
+union LeqStatus {
+    static constexpr uint32_t OFFSET_IN_CLAUSE = 3;
+
+    enum ImplyType {
+        //! no var has been implied from this clause
+        IMPLY_NONE = 0,
+        //! value of dst is implied (preconditions are placed at the beginning)
+        IMPLY_DST = 1,
+        //! some lits are implied (preconditions are placed at the beginning)
+        IMPLY_LITS = 2,
+        //! dst var and know lits cause a conflict
+        IMPLY_CONFL = 3,
+    };
+
+    struct {
+        //! number of known true lits
+        uint16_t nr_true : 15;
+        //! whether preconditions for the imply is true
+        uint16_t precond_is_true : 1;
+        //! number of decided lits (sum of nr_true and nr_false)
+        uint16_t nr_decided : 14;
+        //! one value in ImplyType
+        uint16_t imply_type : 2;
+    };
+    uint32_t val_u32;
+
+    void decr(uint32_t delta_nr_true, uint32_t delta_nr_decided) {
+        val_u32 -= (delta_nr_decided << 16) | delta_nr_true;
+    };
+
+    void incr(uint32_t delta_nr_true, uint32_t delta_nr_decided) {
+        val_u32 += (delta_nr_decided << 16) | delta_nr_true;
+    };
+
+    //! if bit = 1, set imply_type to 0; otherwise it is unchanged.
+    //! bit should be either 0 or 1
+    void clear_imply_type_with(uint32_t bit) {
+        val_u32 &= ((1u << 30) - 1) | (bit - 1);
+    }
+
+    //! get CRef of rellocated clause from this var. Note that the cref is a
+    //! clause, not for a var
+    CRef get_cref_after_reloc() { return *(reinterpret_cast<CRef*>(this) - 3); }
+
+    bool operator==(const LeqStatus& rhs) const {
+        return val_u32 == rhs.val_u32;
+    }
+};
+/* ========================== end LeqStatus =========================== */
+
 //=================================================================================================
 // Clause -- a simple class for representing a clause:
 
-class Clause;
-typedef RegionAllocator<uint32_t>::Ref CRef;
-
 class Clause {
+    /*!
+     * Note:
+     * 1. learnt and is_leq can not both be true
+     * 2. use_extra and is_leq can not both be true
+     * 3. If is_leq is true, there would be two extra data items: one is
+     *    leq_dst, the other is leq_bound
+     * 4. Layout for LEQ clauses: header, lits[], dst, bound, status
+     */
     struct {
         unsigned mark : 2;
         unsigned learnt : 1;
+        unsigned is_leq : 1;
         unsigned has_extra : 1;
         unsigned reloced : 1;
-        unsigned size : 27;
+        unsigned size : 26;
     } header;
-    union {
+    union Data {
         Lit lit;
         float act;
         uint32_t abs;
+        int32_t leq_bound;
+        LeqStatus leq_status;
         CRef rel;
-    } data[0];
+    };
+    Data data[0];
 
     friend class ClauseAllocator;
 
     // NOTE: This constructor cannot be used directly (doesn't allocate enough
     // memory).
     template <class V>
-    Clause(const V& ps, bool use_extra, bool learnt) {
+    Clause(const V& ps, bool use_extra, bool learnt, bool is_leq) {
+        assert(!learnt || !is_leq);
+        assert(!use_extra || !is_leq);
+        assert(ps.size() < (1 << 26));
+        // leq size determined by LeqStatus and LeqWatcher
+        assert(!is_leq || ps.size() < (1 << 14));
+
         header.mark = 0;
         header.learnt = learnt;
+        header.is_leq = is_leq;
         header.has_extra = use_extra;
         header.reloced = 0;
         header.size = ps.size();
 
-        for (int i = 0; i < ps.size(); i++)
+        for (int i = 0; i < ps.size(); i++) {
             data[i].lit = ps[i];
+        }
 
         if (header.has_extra) {
             if (header.learnt)
@@ -202,19 +277,25 @@ public:
         assert(header.has_extra);
         uint32_t abstraction = 0;
         for (int i = 0; i < size(); i++)
-            abstraction |= 1 << (var(data[i].lit) & 31);
+            abstraction |= 1u << (var(data[i].lit) & 31);
         data[header.size].abs = abstraction;
     }
 
     int size() const { return header.size; }
     void shrink(int i) {
-        assert(i <= size());
+        assert(i <= size() && !header.is_leq);
         if (header.has_extra)
             data[header.size - i] = data[header.size];
         header.size -= i;
     }
     void pop() { shrink(1); }
+
     bool learnt() const { return header.learnt; }
+    bool is_leq() const { return header.is_leq; }
+    Lit leq_dst() const { return data[header.size].lit; }
+    int leq_bound() const { return data[header.size + 1].leq_bound; }
+    LeqStatus& leq_status() { return data[header.size + 2].leq_status; }
+    LeqStatus leq_status() const { return data[header.size + 2].leq_status; }
     bool has_extra() const { return header.has_extra; }
     uint32_t mark() const { return header.mark; }
     void mark(uint32_t m) { header.mark = m; }
@@ -222,9 +303,15 @@ public:
 
     bool reloced() const { return header.reloced; }
     CRef relocation() const { return data[0].rel; }
-    void relocate(CRef c) {
+
+    //! relocate to another clause; this can only be called once and is
+    //! destructive
+    void record_relocate(CRef c) {
+        assert(!header.reloced);
         header.reloced = 1;
         data[0].rel = c;
+        // for LEQ clauses
+        data[size() - 1].rel = c;
     }
 
     // NOTE: somewhat unsafe to change the clause in-place! Must manually call
@@ -250,57 +337,78 @@ public:
 //=================================================================================================
 // ClauseAllocator -- a simple class for allocating memory for clauses:
 
-const CRef CRef_Undef = RegionAllocator<uint32_t>::Ref_Undef;
+static constexpr CRef CRef_Undef = RegionAllocator<uint32_t>::Ref_Undef;
 class ClauseAllocator : public RegionAllocator<uint32_t> {
-    static int clauseWord32Size(int size, bool has_extra) {
-        return (sizeof(Clause) + (sizeof(Lit) * (size + (int)has_extra))) /
-               sizeof(uint32_t);
+    using Super = RegionAllocator<uint32_t>;
+
+    static int clauseWord32Size(int size, bool has_extra, bool is_leq) {
+        assert(!has_extra || !is_leq);
+        size += static_cast<int>(has_extra) + static_cast<int>(is_leq) * 3;
+        return (sizeof(Clause) + (sizeof(Lit) * size)) / sizeof(uint32_t);
     }
 
 public:
-    bool extra_clause_field;
+    bool extra_clause_field = false;
 
-    ClauseAllocator(uint32_t start_cap)
-            : RegionAllocator<uint32_t>(start_cap), extra_clause_field(false) {}
-    ClauseAllocator() : extra_clause_field(false) {}
+    ClauseAllocator(uint32_t start_cap) : Super(start_cap) {}
+    ClauseAllocator() = default;
 
     void moveTo(ClauseAllocator& to) {
         to.extra_clause_field = extra_clause_field;
-        RegionAllocator<uint32_t>::moveTo(to);
+        Super::moveTo(to);
     }
 
     template <class Lits>
-    CRef alloc(const Lits& ps, bool learnt = false) {
-        assert(sizeof(Lit) == sizeof(uint32_t));
-        assert(sizeof(float) == sizeof(uint32_t));
+    CRef alloc(const Lits& ps, bool learnt = false, Lit leq_dst = lit_Undef,
+               int leq_bound = 0) {
+        static_assert(sizeof(Clause::Data) == sizeof(uint32_t));
         bool use_extra = learnt | extra_clause_field;
+        bool is_leq = leq_dst != lit_Undef;
 
-        CRef cid = RegionAllocator<uint32_t>::alloc(
-                clauseWord32Size(ps.size(), use_extra));
-        new (lea(cid)) Clause(ps, use_extra, learnt);
+        CRef cid = Super::alloc(clauseWord32Size(ps.size(), use_extra, is_leq));
+        Clause* cl = new (lea(cid)) Clause{ps, use_extra, learnt, is_leq};
+
+        if (is_leq) {
+            cl->data[ps.size()].lit = leq_dst;
+            cl->data[ps.size() + 1].leq_bound = leq_bound;
+            cl->data[ps.size() + 2].leq_status.val_u32 = 0;
+        }
 
         return cid;
     }
 
     // Deref, Load Effective Address (LEA), Inverse of LEA (AEL):
+
     Clause& operator[](Ref r) {
-        return (Clause&)RegionAllocator<uint32_t>::operator[](r);
+        return reinterpret_cast<Clause&>(Super::operator[](r));
     }
     const Clause& operator[](Ref r) const {
-        return (Clause&)RegionAllocator<uint32_t>::operator[](r);
+        return const_cast<ClauseAllocator*>(this)->operator[](r);
     }
-    Clause* lea(Ref r) { return (Clause*)RegionAllocator<uint32_t>::lea(r); }
+    Clause* lea(Ref r) { return reinterpret_cast<Clause*>(Super::lea(r)); }
     const Clause* lea(Ref r) const {
-        return (Clause*)RegionAllocator<uint32_t>::lea(r);
+        return const_cast<ClauseAllocator*>(this)->lea(r);
     }
-    Ref ael(const Clause* t) {
-        return RegionAllocator<uint32_t>::ael((uint32_t*)t);
+    template <typename T>
+    T* lea_as(Ref r) {
+        static_assert(sizeof(T) % sizeof(uint32_t) == 0 &&
+                      alignof(T) % alignof(uint32_t) == 0);
+        return reinterpret_cast<T*>(Super::lea(r));
+    }
+    template <typename T>
+    const T* lea_as(Ref r) const {
+        return const_cast<ClauseAllocator*>(this)->lea_as<T>(r);
+    }
+    template <typename T>
+    Ref ael(const T* t) {
+        static_assert(sizeof(T) % sizeof(uint32_t) == 0 &&
+                      alignof(T) % alignof(uint32_t) == 0);
+        return Super::ael(reinterpret_cast<const uint32_t*>(t));
     }
 
     void free(CRef cid) {
         Clause& c = operator[](cid);
-        RegionAllocator<uint32_t>::free(
-                clauseWord32Size(c.size(), c.has_extra()));
+        Super::free(clauseWord32Size(c.size(), c.has_extra(), c.is_leq()));
     }
 
     void reloc(CRef& cr, ClauseAllocator& to) {
@@ -311,8 +419,13 @@ public:
             return;
         }
 
-        cr = to.alloc(c, c.learnt());
-        c.relocate(cr);
+        if (c.is_leq()) {
+            cr = to.alloc(c, c.learnt(), c.leq_dst(), c.leq_bound());
+            to[cr].leq_status() = c.leq_status();
+        } else {
+            cr = to.alloc(c, c.learnt());
+        }
+        c.record_relocate(cr);
 
         // Copy extra data-fields:
         // (This could be cleaned-up. Generalize Clause-constructor to be
@@ -336,12 +449,16 @@ class OccLists {
     Deleted m_deleted;
 
 public:
-    OccLists(const Deleted& d) : m_deleted{d} {}
+    template <typename... Args>
+    explicit OccLists(Args&&... args)
+            : m_deleted{std::forward<Args>(args)...} {}
 
     void init(const Idx& idx) {
         size_t size = toInt(idx) + 1;
         if (size > m_occs.size()) {
-            m_occs.resize(size);
+            while (m_occs.size() < size) {
+                m_occs.emplace_back();
+            }
             m_dirty.growTo(size);
         }
     }

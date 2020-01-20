@@ -219,3 +219,14 @@ UNSAT/ssa/ssa0432-003.cnf
 UNSAT/ssa/ssa2670-130.cnf
 UNSAT/ssa/ssa2670-141.cnf
 UNSAT/ssa/ssa6288-047.cnf
+SAT/ineq/rand0.cnf
+SAT/ineq/rand1.cnf
+SAT/ineq/rand2.cnf
+SAT/ineq/rand3.cnf.gz
+SAT/ineq/rand4.cnf.gz
+SAT/ineq/simple0.cnf
+SAT/ineq/simple1.cnf
+SAT/ineq/simple2.cnf
+SAT/ineq/simplify.cnf
+UNSAT/ineq/simple0.cnf
+UNSAT/ineq/simple1.cnf

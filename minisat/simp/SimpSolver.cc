@@ -310,7 +310,7 @@ bool SimpSolver::implied(const vec<Lit>& c)
 {
     assert(decisionLevel() == 0);
 
-    trail_lim.push(trail.size());
+    trail_lim.push({trail.size(), 0});
     for (int i = 0; i < c.size(); i++)
         if (value(c[i]) == l_True){
             cancelUntil(0);
@@ -401,7 +401,7 @@ bool SimpSolver::asymm(Var v, CRef cr)
 
     if (c.mark() || satisfied(c)) return true;
 
-    trail_lim.push(trail.size());
+    trail_lim.push({trail.size(), 0});
     Lit l = lit_Undef;
     for (int i = 0; i < c.size(); i++)
         if (var(c[i]) != v && value(c[i]) != l_False)

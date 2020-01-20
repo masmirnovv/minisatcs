@@ -42,7 +42,6 @@ namespace Minisat {
 
 template <class T>
 class vec {
-    static_assert(std::is_trivially_copyable<T>::value, "bad T");
     int m_sz = 0;
     int m_cap = 0;
     T* m_data = nullptr;
@@ -81,7 +80,7 @@ public:
     // Size operations:
     int size() const { return m_sz; }
     void shrink(int nelems) {
-        assert(nelems <= m_sz);
+        assert(nelems >= 0 && nelems <= m_sz);
         m_sz -= nelems;
     }
     int capacity(void) const { return m_cap; }
@@ -178,6 +177,7 @@ void vec<T>::growTo(int size) {
 
 template <class T>
 void vec<T>::clear(bool dealloc) {
+    static_assert(std::is_trivially_copyable<T>::value);
     if (m_data != NULL) {
         m_sz = 0;
         if (dealloc) {

@@ -29,6 +29,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "minisat/mtl/Vec.h"
 #include "minisat/utils/Options.h"
 
+#include <utility>
+
 namespace Minisat {
 
 //=================================================================================================
@@ -48,14 +50,22 @@ public:
                                    // specifying variable mode.
 
     bool addClause(const vec<Lit>& ps);  // Add a clause to the solver.
-    bool
-    addEmptyClause();  // Add the empty clause, making the solver contradictory.
+    //! Add the empty clause, making the solver contradictory.
+    bool addEmptyClause();
     bool addClause(Lit p);                // Add a unit clause to the solver.
     bool addClause(Lit p, Lit q);         // Add a binary clause to the solver.
     bool addClause(Lit p, Lit q, Lit r);  // Add a ternary clause to the solver.
     bool addClause_(vec<Lit>& ps);  // Add a clause to the solver without making
                                     // superflous internal copy. Will change the
                                     // passed vector 'ps'.
+
+    //! Add dst = (sum(ps) <= bound) to the solver
+    bool addLeqAssign_(vec<Lit>& ps, int bound, Lit dst);
+
+    //! Add dst = (sum(ps) >= bound) to the solver
+    bool addGeqAssign_(vec<Lit>& ps, int bound, Lit dst) {
+        return addLeqAssign_(ps, bound - 1, ~dst);
+    }
 
     // Solving:
     //
@@ -172,16 +182,14 @@ public:
             tot_literals;
 
 protected:
+    using abstract_level_set_t = uint_fast32_t;
+
     // Helper structures:
     //
     struct VarData {
         CRef reason;
         int level;
     };
-    static inline VarData mkVarData(CRef cr, int l) {
-        VarData d = {cr, l};
-        return d;
-    }
 
     struct Watcher {
         CRef cref;
@@ -191,10 +199,23 @@ protected:
         bool operator!=(const Watcher& w) const { return cref != w.cref; }
     };
 
+    //! watcher for LEQ clauses
+    struct LeqWatcher;
+
+    //! modification log of LeqStatus
+    struct LeqStatusModLog;
+
+    //! used in trail_lim
+    struct TrailSep {
+        int lit, leq;
+    };
+
+    template <class WatcherT>
     struct WatcherDeleted {
         const ClauseAllocator& ca;
         WatcherDeleted(const ClauseAllocator& _ca) : ca(_ca) {}
-        bool operator()(const Watcher& w) const {
+
+        bool operator()(const WatcherT& w) const {
             return ca[w.cref].mark() == 1;
         }
     };
@@ -209,25 +230,29 @@ protected:
 
     // Solver state:
     //
-    bool ok;  // If FALSE, the constraints are already unsatisfiable. No part of
-              // the solver state may be used!
+    bool ok;  // If FALSE, the constraints are already unsatisfiable. No
+              // part of the solver state may be used!
     vec<CRef> clauses;  // List of problem clauses.
     vec<CRef> learnts;  // List of learnt clauses.
     double cla_inc;     // Amount to bump next clause with.
     vec<double>
             activity;  // A heuristic measurement of the activity of a variable.
     double var_inc;    // Amount to bump next variable with.
-    OccLists<Lit, vec<Watcher>, WatcherDeleted>
-            watches;  // 'watches[lit]' is a list of constraints watching 'lit'
-                      // (will go there if literal becomes true).
+    //! 'watches[lit]' is a list of constraints watching 'lit' (will go there if
+    //! literal becomes true).
+    OccLists<Lit, vec<Watcher>, WatcherDeleted<Watcher>> watches;
+    //! constraints watching a var, triggered when it is decided
+    OccLists<Var, vec<LeqWatcher>, WatcherDeleted<LeqWatcher>> leq_watches;
     vec<lbool> assigns;  // The current assignments.
     vec<char> polarity;  // The preferred polarity of each variable.
     vec<char> decision;  // Declares if a variable is eligible for selection in
                          // the decision heuristic.
-    vec<Lit> trail;      // Assignment stack; stores all assigments made in the
-                         // order they were made.
-    vec<int> trail_lim;  // Separator indices for different decision levels in
-                         // 'trail'.
+    //! Assignment stack; stores all assigments made in the order they were made
+    vec<Lit> trail;
+    //! Record of modification on LeqStatus that needs to be undone
+    vec<LeqStatusModLog> trail_leq_stat;
+    //! Separator indices for different decision levels in 'trail
+    vec<TrailSep> trail_lim;
     vec<VarData> vardata;  // Stores reason and level for each variable.
     int qhead;  // Head of queue (as index into the trail -- no more explicit
                 // propagation queue in MiniSat).
@@ -263,7 +288,7 @@ protected:
     //
     int64_t conflict_budget;     // -1 means no budget.
     int64_t propagation_budget;  // -1 means no budget.
-    bool asynch_interrupt;
+    volatile bool asynch_interrupt;
 
     // Main internal methods:
     //
@@ -271,24 +296,26 @@ protected:
             Var x);  // Insert a variable in the decision order priority queue.
     Lit pickBranchLit();      // Return the next decision variable.
     void newDecisionLevel();  // Begins a new decision level.
-    void uncheckedEnqueue(
-            Lit p, CRef from = CRef_Undef);  // Enqueue a literal. Assumes value
-                                             // of literal is undefined.
-    bool enqueue(Lit p,
-                 CRef from = CRef_Undef);  // Test if fact 'p' contradicts
-                                           // current state, enqueue otherwise.
+    //! Enqueue a literal. Assumes value of literal is undefined.
+    void uncheckedEnqueue(Lit p, CRef from = CRef_Undef);
+    //! revert newly added literals in the queue until size is no larger than
+    //! target_size
+    void dequeueUntil(int target_size);
     CRef propagate();  // Perform unit propagation. Returns possibly conflicting
                        // clause.
-    void cancelUntil(int level);  // Backtrack until a certain level.
+    //! handle LEQ clauses related to the new fact, and return conflict
+    CRef propagate_leq(Lit new_fact);
+    //! Backtrack until a certain leve, by keeping all assignment at 'level' but
+    //! not beyond
+    void cancelUntil(int level);
     void analyze(CRef confl, vec<Lit>& out_learnt,
                  int& out_btlevel);  // (bt = backtrack)
     void analyzeFinal(
             Lit p, vec<Lit>& out_conflict);  // COULD THIS BE IMPLEMENTED BY THE
                                              // ORDINARIY "analyze" BY SOME
                                              // REASONABLE GENERALIZATION?
-    bool litRedundant(
-            Lit p,
-            uint32_t abstract_levels);  // (helper method for 'analyze()')
+    //! check if a lit is redundant given current visited lits in analyze()
+    bool litRedundant(Lit p, abstract_level_set_t abstract_levels);
     lbool search(int nof_conflicts);  // Search for a given number of conflicts.
     lbool solve_();   // Main solve method (assumptions given in 'assumptions').
     void reduceDB();  // Reduce the set of learnt clauses.
@@ -313,14 +340,25 @@ protected:
             Clause& c);  // Increase a clause with the current 'bump' value.
 
     // Operations on clauses:
-    //
+
+    // LEQ clauses:
+    //! remove duplicatations in ps and modify ps and bound inplace
+    void canonize_leq_clause(vec<Lit>& ps, int& bound);
+    //! try constant propagation on LEQ clauses
+    std::optional<bool> try_leq_clause_const_prop(const vec<Lit>& ps, Lit dst,
+                                                  int bound);
+    //! add a new LEQ clause and setup watchers
+    void add_leq_and_setup_watchers(vec<Lit>& ps, Lit dst, int bound);
+
+    // disjunction clauses:
     void attachClause(CRef cr);  // Attach a clause to watcher lists.
     void detachClause(
             CRef cr, bool strict = false);  // Detach a clause to watcher lists.
     void removeClause(CRef cr);             // Detach and free a clause.
-    bool locked(
-            const Clause& c) const;  // Returns TRUE if a clause is a reason for
-                                     // some implication in the current state.
+
+    //! Check if a clause is a reason for some implication in the current state.
+    //! This function should only be called on disjunction clauses
+    bool locked_disj(const Clause& c) const;
     bool satisfied(const Clause& c) const;  // Returns TRUE if a clause is
                                             // satisfied in the current state.
 
@@ -328,9 +366,10 @@ protected:
 
     // Misc:
     //
-    int decisionLevel() const;            // Gives the current decisionlevel.
-    uint32_t abstractLevel(Var x) const;  // Used to represent an abstraction of
-                                          // sets of decision levels.
+    int decisionLevel() const;  // Gives the current decisionlevel.
+    //! get an abstract representation of the level of var
+    abstract_level_set_t abstractLevel(Var x) const;
+    // sets of decision levels.
     CRef reason(Var x) const;
     int level(Var x) const;
     double progressEstimate() const;  // DELETE THIS ?? IT'S NOT VERY USEFUL ...
@@ -351,6 +390,17 @@ protected:
     static inline int irand(double& seed, int size) {
         return (int)(drand(seed) * size);
     }
+
+    //! move lits with known values matching target value to the beginning
+    template <bool sel_true>
+    void select_known_lits(Clause& c, int num);
+
+    //! Move lits with known values matching target value to the beginning, and
+    //! enqueue unknown lits to be the opposite;
+    //! If the number of known vars is greater than nr_known, revert all
+    //! enqueued values and return false.
+    template <bool sel_true>
+    bool select_known_and_imply_unknown(CRef cr, Clause& c, int nr_known);
 };
 
 //=================================================================================================
@@ -407,11 +457,6 @@ inline void Solver::checkGarbage(double gf) {
         garbageCollect();
 }
 
-// NOTE: enqueue does not set the ok flag! (only public methods do)
-inline bool Solver::enqueue(Lit p, CRef from) {
-    return value(p) != l_Undef ? value(p) != l_False
-                               : (uncheckedEnqueue(p, from), true);
-}
 inline bool Solver::addClause(const vec<Lit>& ps) {
     ps.copyTo(add_tmp);
     return addClause_(add_tmp);
@@ -438,19 +483,20 @@ inline bool Solver::addClause(Lit p, Lit q, Lit r) {
     add_tmp.push(r);
     return addClause_(add_tmp);
 }
-inline bool Solver::locked(const Clause& c) const {
+inline bool Solver::locked_disj(const Clause& c) const {
     return value(c[0]) == l_True && reason(var(c[0])) != CRef_Undef &&
            ca.lea(reason(var(c[0]))) == &c;
 }
 inline void Solver::newDecisionLevel() {
-    trail_lim.push(trail.size());
+    trail_lim.push({trail.size(), trail_leq_stat.size()});
 }
 
 inline int Solver::decisionLevel() const {
     return trail_lim.size();
 }
-inline uint32_t Solver::abstractLevel(Var x) const {
-    return 1 << (level(x) & 31);
+inline Solver::abstract_level_set_t Solver::abstractLevel(Var x) const {
+    return static_cast<abstract_level_set_t>(1)
+           << (level(x) & (sizeof(abstract_level_set_t) * 8 - 1));
 }
 inline lbool Solver::value(Var x) const {
     return assigns[x];
@@ -478,7 +524,7 @@ inline int Solver::nVars() const {
 }
 inline int Solver::nFreeVars() const {
     return (int)dec_vars -
-           (trail_lim.size() == 0 ? trail.size() : trail_lim[0]);
+           (trail_lim.size() == 0 ? trail.size() : trail_lim[0].lit);
 }
 inline void Solver::setPolarity(Var v, bool b) {
     polarity[v] = b;
