@@ -19,6 +19,9 @@ option(MINISAT_BUILD_BINARIES "minisat: build binaries" ${MINISAT_MASTER_PROJECT
 option(MINISAT_BUILD_TESTING "Build and run MiniSat's tests" ON)
 option(MINISAT_TEST_BENCHMARKS "Register benchmarks with CTest" OFF)
 option(MINISAT_INSTALL "minisat: generate the install target" ON)
+option(MINISAT_NOINLINE "disable inline (for easier profiling / debugging, etc)" OFF)
+option(MINISAT_GPROF "enable gprof" OFF)
+option(MINISAT_GPERF "enable gperftools for profiling" OFF)
 
 find_package(ZLIB)
 
@@ -123,6 +126,19 @@ endforeach()
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -O3")
 string(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
+if (MINISAT_NOINLINE OR MINISAT_GPROF)
+    message("inline disabled")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -fno-inline -fno-omit-frame-pointer")
+endif()
+if (MINISAT_GPROF)
+    message("gprof enabled")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -pg")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}  -pg")
+endif()
+if (MINISAT_GPERF)
+    message("gperftools enabled")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}  -lprofiler")
+endif()
 
 ###############
 # Testing

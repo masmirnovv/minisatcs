@@ -639,6 +639,9 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel) {
                 out_learnt[j++] = out_learnt[i];
             else {
                 Clause& c = ca[reason(var(out_learnt[i]))];
+                if (c.is_leq()) {
+                    throw std::runtime_error{"ccmin=1 for LEQ clause unimplemented"};
+                }
                 for (int k = 1; k < c.size(); k++)
                     if (!seen[var(c[k])] && level(var(c[k])) > 0) {
                         out_learnt[j++] = out_learnt[i];
@@ -877,7 +880,16 @@ CRef Solver::propagate() {
 CRef Solver::propagate_leq(Lit new_fact) {
     int fact_is_true = sign(new_fact) ^ 1;
 
-    for (LeqWatcher watch : leq_watches[var(new_fact)]) {
+    const vec<LeqWatcher>& watcher_list = leq_watches[var(new_fact)];
+    int watcher_size = watcher_list.size();
+    for (int watcher_idx = 0; watcher_idx < watcher_size; ++watcher_idx) {
+        if (watcher_idx % 4 == 0 && watcher_idx + 4 < watcher_size) {
+            __builtin_prefetch(&watcher_list[watcher_idx + 1].status(ca), 1, 1);
+            __builtin_prefetch(&watcher_list[watcher_idx + 2].status(ca), 1, 1);
+            __builtin_prefetch(&watcher_list[watcher_idx + 3].status(ca), 1, 1);
+            __builtin_prefetch(&watcher_list[watcher_idx + 4].status(ca), 1, 1);
+        }
+        LeqWatcher watch = watcher_list[watcher_idx];
         LeqStatus& stat = watch.status(ca);
         if (stat.imply_type) {
             // already used for implication, skip this clause
