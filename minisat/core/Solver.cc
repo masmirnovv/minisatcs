@@ -55,6 +55,8 @@ static IntOption opt_phase_saving(
         _cat, "phase-saving",
         "Controls the level of phase saving (0=none, 1=limited, 2=full)", 2,
         IntRange(0, 2));
+static BoolOption opt_rnd_pol(_cat, "rnd-pol",
+                              "Randomize the polarity for decision", false);
 static BoolOption opt_rnd_init_act(_cat, "rnd-init",
                                    "Randomize the initial activity", false);
 static BoolOption opt_luby_restart(_cat, "luby",
@@ -130,7 +132,7 @@ Solver::Solver()
           luby_restart(opt_luby_restart),
           ccmin_mode(opt_ccmin_mode),
           phase_saving(opt_phase_saving),
-          rnd_pol(false),
+          rnd_pol(opt_rnd_pol),
           rnd_init_act(opt_rnd_init_act),
           garbage_frac(opt_garbage_frac),
           restart_first(opt_restart_first),
@@ -640,7 +642,8 @@ void Solver::analyze(CRef confl, vec<Lit>& out_learnt, int& out_btlevel) {
             else {
                 Clause& c = ca[reason(var(out_learnt[i]))];
                 if (c.is_leq()) {
-                    throw std::runtime_error{"ccmin=1 for LEQ clause unimplemented"};
+                    throw std::runtime_error{
+                            "ccmin=1 for LEQ clause unimplemented"};
                 }
                 for (int k = 1; k < c.size(); k++)
                     if (!seen[var(c[k])] && level(var(c[k])) > 0) {
