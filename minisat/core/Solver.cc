@@ -24,6 +24,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include "minisat/core/Solver.h"
 #include "minisat/mtl/Sort.h"
+#include "minisat/utils/System.h"
 
 using namespace Minisat;
 
@@ -174,7 +175,7 @@ Solver::Solver()
           qhead(0),
           simpDB_assigns(-1),
           simpDB_props(0),
-          order_heap(VarOrderLt(activity)),
+          order_heap(VarOrderLt{this}),
           progress_estimate(0),
           remove_satisfied(true)
 
@@ -204,8 +205,8 @@ Var Solver::newVar(bool sign, bool dvar) {
     leq_watches.init(v);
     assigns.push(l_Undef);
     vardata.push(VarData{CRef_Undef, 0});
-    // activity .push(0);
     activity.push(rnd_init_act ? drand(random_seed) * 0.00001 : 0);
+    var_preference.push(0);
     seen.push(0);
     polarity.push(sign);
     decision.push();
@@ -1309,6 +1310,32 @@ lbool Solver::solve_() {
     if (!ok)
         return l_False;
 
+    double cpu_time_begin = 0;
+    if (verbosity > 0) {
+        cpu_time_begin = cpuTime();
+        printf("============================[ Problem Statistics "
+               "]=============================\n");
+        printf("|  Number of variables:  %12d                                  "
+               "       |\n",
+               nVars());
+        printf("|  Number of clauses:    %12d                                  "
+               "       |\n",
+               nClauses());
+    }
+
+    // first try simplify() for unit propagation
+    {
+        bool simplify_result = simplify();
+        if (verbosity > 0) {
+            printf("|  Simplified: (result=%d)%12d                             "
+                   "            |\n",
+                   simplify_result, nClauses());
+        }
+        if (!simplify_result) {
+            return l_False;
+        }
+    }
+
     solves++;
 
     max_learnts = nClauses() * learntsize_factor;
@@ -1338,9 +1365,23 @@ lbool Solver::solve_() {
         curr_restarts++;
     }
 
-    if (verbosity >= 1)
+    if (verbosity >= 1) {
+        double cpu_time = cpuTime() - cpu_time_begin;
         printf("==============================================================="
                "================\n");
+        printf("restarts              : %" PRIu64 "\n", starts);
+        printf("conflicts             : %-12" PRIu64 "   (%.0f /sec)\n",
+               conflicts, conflicts / cpu_time);
+        printf("decisions             : %-12" PRIu64
+               "   (%4.2f %% random) (%.0f /sec)\n",
+               decisions, (float)rnd_decisions * 100 / (float)decisions,
+               decisions / cpu_time);
+        printf("propagations          : %-12" PRIu64 "   (%.0f /sec)\n",
+               propagations, propagations / cpu_time);
+        printf("conflict literals     : %-12" PRIu64 "   (%4.2f %% deleted)\n",
+               tot_literals,
+               (max_literals - tot_literals) * 100 / (double)max_literals);
+    }
 
     if (status == l_True) {
         // Extend & copy model:

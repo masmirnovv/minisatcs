@@ -1,8 +1,22 @@
 #include "minisat/core/Solver.h"
-#include <vector>
-#include <algorithm>
 
-class WrappedMinisatSolver: public Minisat::Solver {
+#include <signal.h>
+
+#include <algorithm>
+#include <cstring>
+#include <vector>
+
+class WrappedMinisatSolver : public Minisat::Solver {
+    class ScopedSolverAssign {
+        WrappedMinisatSolver** dst;
+
+    public:
+        explicit ScopedSolverAssign(WrappedMinisatSolver** dst,
+                                    WrappedMinisatSolver* src) {
+            *dst = src;
+        }
+        ~ScopedSolverAssign() { *dst = nullptr; }
+    };
     int m_new_clause_max_var = 0;
 
     void add_vars() {
@@ -26,9 +40,7 @@ public:
         add_tmp.clear();
     }
 
-    void new_clause_add_lit(int lit) {
-        add_tmp.push(make_lit(lit));
-    }
+    void new_clause_add_lit(int lit) { add_tmp.push(make_lit(lit)); }
 
     void new_clause_commit() {
         add_vars();
@@ -50,6 +62,10 @@ public:
         add_tmp.clear();
     }
 
+    void set_var_preference(int x, int p) {
+        setVarPreference(std::abs(x) - 1, p);
+    }
+
     std::vector<int> get_model() const {
         std::vector<int> ret;
         for (int i = 0; i < model.size(); ++i) {
@@ -60,6 +76,43 @@ public:
             }
         }
         return ret;
+    }
+
+    bool solve_with_signal(bool setup) {
+        static WrappedMinisatSolver* g_solver = nullptr;
+        static auto on_sig = [](int) {
+            if (g_solver) {
+                g_solver->interrupt();
+            }
+        };
+        clearInterrupt();
+        struct sigaction old_action;
+        ScopedSolverAssign g_solver_assign{&g_solver, this};
+        if (setup) {
+            struct sigaction act;
+            memset(&act, 0, sizeof(act));
+            act.sa_handler = on_sig;
+            if (sigaction(SIGINT, &act, &old_action)) {
+                char msg[1024];
+                snprintf(msg, sizeof(msg), "failed to setup signal handler: %s",
+                         strerror(errno));
+                throw std::runtime_error{msg};
+            }
+        }
+        budgetOff();
+        assumptions.clear();
+        auto ret = solve_();
+        if (sigaction(SIGINT, &old_action, nullptr)) {
+            char msg[1024];
+            snprintf(msg, sizeof(msg), "failed to restore signal handler: %s",
+                     strerror(errno));
+            throw std::runtime_error{msg};
+        }
+
+        if (ret.is_not_undef()) {
+            return ret == l_True;
+        }
+        throw std::runtime_error("computation interrupted");
     }
 };
 

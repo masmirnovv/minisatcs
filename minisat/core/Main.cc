@@ -38,15 +38,10 @@ static const char* MSG_INDET = "r=INDET";
 //=================================================================================================
 
 
-void printStats(Solver& solver)
+void printStats(Solver&)
 {
     double cpu_time = cpuTime();
     double mem_used = memUsedPeak();
-    printf("restarts              : %" PRIu64"\n", solver.starts);
-    printf("conflicts             : %-12" PRIu64"   (%.0f /sec)\n", solver.conflicts   , solver.conflicts   /cpu_time);
-    printf("decisions             : %-12" PRIu64"   (%4.2f %% random) (%.0f /sec)\n", solver.decisions, (float)solver.rnd_decisions*100 / (float)solver.decisions, solver.decisions   /cpu_time);
-    printf("propagations          : %-12" PRIu64"   (%.0f /sec)\n", solver.propagations, solver.propagations/cpu_time);
-    printf("conflict literals     : %-12" PRIu64"   (%4.2f %% deleted)\n", solver.tot_literals, (solver.max_literals - solver.tot_literals)*100 / (double)solver.max_literals);
     if (mem_used != 0) printf("Memory used           : %.2f MB\n", mem_used);
     printf("CPU time              : %g s\n", cpu_time);
 }
@@ -130,17 +125,9 @@ int main(int argc, char** argv)
         if (in == NULL)
             printf("ERROR! Could not open file: %s\n", argc == 1 ? "<stdin>" : argv[1]), exit(1);
 
-        if (S.verbosity > 0){
-            printf("============================[ Problem Statistics ]=============================\n");
-            printf("|                                                                             |\n"); }
-
         parse_DIMACS(in, S);
         gzclose(in);
         FILE* res = (argc >= 3) ? fopen(argv[2], "wb") : NULL;
-
-        if (S.verbosity > 0){
-            printf("|  Number of variables:  %12d                                         |\n", S.nVars());
-            printf("|  Number of clauses:    %12d                                         |\n", S.nClauses()); }
 
         double parsed_time = cpuTime();
         if (S.verbosity > 0){
@@ -151,23 +138,6 @@ int main(int argc, char** argv)
         // voluntarily:
         signal(SIGINT, SIGINT_interrupt);
         signal(SIGXCPU,SIGINT_interrupt);
-
-        bool simplify_result = S.simplify();
-        if (S.verbosity > 0) {
-            printf("|  Simplified: (result=%d)%12d                                         |\n", simplify_result,
-                   S.nClauses());
-        }
-
-        if (!simplify_result) {
-            if (res != NULL) fprintf(res, "%s\n", MSG_UNSAT), fclose(res);
-            if (S.verbosity > 0){
-                printf("===============================================================================\n");
-                printf("Solved by unit propagation\n");
-                printStats(S);
-                printf("\n"); }
-            printf("%s\n", MSG_UNSAT);
-            exit(20);
-        }
 
         vec<Lit> dummy;
         lbool ret = S.solveLimited(dummy);

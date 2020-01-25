@@ -98,13 +98,15 @@ public:
 
     // Variable mode:
     //
-    void setPolarity(
-            Var v,
-            bool b);  // Declare which polarity the decision heuristic should
-                      // use for a variable. Requires mode 'polarity_user'.
-    void setDecisionVar(Var v,
-                        bool b);  // Declare if a variable should be eligible
-                                  // for selection in the decision heuristic.
+    //! Declare which polarity the decision heuristic should use for a variable.
+    //! Requires mode 'polarity_user'
+    void setPolarity(Var v, bool b) { polarity[v] = b; }
+    //! set var preference to break ties with equal activity; less value means
+    //! preferred
+    void setVarPreference(Var v, int p) { var_preference[v] = p; }
+    //! Declare if a variable should be eligible for selection in the decision
+    //! heuristic.
+    void setDecisionVar(Var v, bool b);
 
     // Read state:
     //
@@ -220,12 +222,13 @@ protected:
         }
     };
 
-    struct VarOrderLt {
-        const vec<double>& activity;
-        bool operator()(Var x, Var y) const {
-            return activity[x] > activity[y];
-        }
-        VarOrderLt(const vec<double>& act) : activity(act) {}
+    class VarOrderLt {
+        static constexpr double eps = 1e-6;
+        const Solver* m_solver;
+
+    public:
+        inline bool operator()(Var x, Var y) const;
+        explicit VarOrderLt(const Solver* solver) : m_solver{solver} {}
     };
 
     // Solver state:
@@ -235,9 +238,11 @@ protected:
     vec<CRef> clauses;  // List of problem clauses.
     vec<CRef> learnts;  // List of learnt clauses.
     double cla_inc;     // Amount to bump next clause with.
-    vec<double>
-            activity;  // A heuristic measurement of the activity of a variable.
-    double var_inc;    // Amount to bump next variable with.
+    //! A heuristic measurement of the activity of a variable.
+    vec<double> activity;
+    //! user-defiend branching order of the vars
+    vec<int> var_preference;
+    double var_inc;  // Amount to bump next variable with.
     //! 'watches[lit]' is a list of constraints watching 'lit' (will go there if
     //! literal becomes true).
     OccLists<Lit, vec<Watcher>, WatcherDeleted<Watcher>> watches;
@@ -526,9 +531,6 @@ inline int Solver::nFreeVars() const {
     return (int)dec_vars -
            (trail_lim.size() == 0 ? trail.size() : trail_lim[0].lit);
 }
-inline void Solver::setPolarity(Var v, bool b) {
-    polarity[v] = b;
-}
 inline void Solver::setDecisionVar(Var v, bool b) {
     if (b && !decision[v])
         dec_vars++;
@@ -624,6 +626,13 @@ inline void Solver::toDimacs(const char* file, Lit p, Lit q, Lit r) {
     as.push(q);
     as.push(r);
     toDimacs(file, as);
+}
+
+bool Solver::VarOrderLt::operator()(Var x, Var y) const {
+    auto&& act = m_solver->activity;
+    return act[x] > act[y] + eps ||
+           (act[x] > act[y] - eps &&
+            m_solver->var_preference[x] < m_solver->var_preference[y]);
 }
 
 //=================================================================================================
