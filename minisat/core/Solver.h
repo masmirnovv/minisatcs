@@ -28,6 +28,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "minisat/mtl/Heap.h"
 #include "minisat/mtl/Vec.h"
 #include "minisat/utils/Options.h"
+#include "minisat/utils/Random.h"
 
 #include <utility>
 
@@ -153,7 +154,6 @@ public:
     double var_decay;
     double clause_decay;
     double random_var_freq;
-    double random_seed;
     bool luby_restart;
     int ccmin_mode;  // Controls conflict clause minimization (0=none, 1=basic,
                      // 2=deep).
@@ -295,6 +295,8 @@ protected:
     int64_t propagation_budget;  // -1 means no budget.
     volatile bool asynch_interrupt;
 
+    RandomState random_state;
+
     // Main internal methods:
     //
     void insertVarOrder(
@@ -382,19 +384,6 @@ protected:
 
     // Static helpers:
     //
-
-    // Returns a random float 0 <= x < 1. Seed must never be 0.
-    static inline double drand(double& seed) {
-        seed *= 1389796;
-        int q = (int)(seed / 2147483647);
-        seed -= (double)q * 2147483647;
-        return seed / 2147483647;
-    }
-
-    // Returns a random integer 0 <= x < size. Seed must never be 0.
-    static inline int irand(double& seed, int size) {
-        return (int)(drand(seed) * size);
-    }
 
     //! move lits with known values matching target value to the beginning
     template <bool sel_true>

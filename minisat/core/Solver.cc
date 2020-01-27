@@ -44,10 +44,9 @@ static DoubleOption opt_random_var_freq(
         "The frequency with which the decision heuristic tries to choose a "
         "random variable",
         0, DoubleRange(0, true, 1, true));
-static DoubleOption opt_random_seed(_cat, "rnd-seed",
-                                    "Used by the random variable selection",
-                                    91648253,
-                                    DoubleRange(0, false, HUGE_VAL, false));
+static IntOption opt_random_seed(_cat, "rnd-seed",
+                                 "Used by the random variable selection",
+                                 92702102, IntRange(0, INT_MAX));
 static IntOption opt_ccmin_mode(
         _cat, "ccmin-mode",
         "Controls conflict clause minimization (0=none, 1=basic, 2=deep)", 2,
@@ -129,7 +128,6 @@ Solver::Solver()
           var_decay(opt_var_decay),
           clause_decay(opt_clause_decay),
           random_var_freq(opt_random_var_freq),
-          random_seed(opt_random_seed),
           luby_restart(opt_luby_restart),
           ccmin_mode(opt_ccmin_mode),
           phase_saving(opt_phase_saving),
@@ -184,7 +182,11 @@ Solver::Solver()
           ,
           conflict_budget(-1),
           propagation_budget(-1),
-          asynch_interrupt(false) {
+          asynch_interrupt(false),
+
+          random_state{static_cast<uint64_t>(opt_random_seed)}
+
+{
     static_assert(sizeof(LeqWatcher) == sizeof(uint64_t));
     static_assert(sizeof(LeqStatusModLog) == sizeof(uint32_t));
 }
@@ -205,7 +207,7 @@ Var Solver::newVar(bool sign, bool dvar) {
     leq_watches.init(v);
     assigns.push(l_Undef);
     vardata.push(VarData{CRef_Undef, 0});
-    activity.push(rnd_init_act ? drand(random_seed) * 0.00001 : 0);
+    activity.push(rnd_init_act ? random_state.uniform() * 0.00001 : 0);
     var_preference.push(0);
     seen.push(0);
     polarity.push(sign);
@@ -480,8 +482,9 @@ Lit Solver::pickBranchLit() {
     Var next = var_Undef;
 
     // Random decision:
-    if (drand(random_seed) < random_var_freq && !order_heap.empty()) {
-        next = order_heap[irand(random_seed, order_heap.size())];
+    if (random_var_freq && !order_heap.empty() &&
+        random_state.binomial(random_var_freq)) {
+        next = order_heap[random_state.randint(order_heap.size())];
         if (value(next) == l_Undef && decision[next])
             rnd_decisions++;
     }
@@ -495,7 +498,7 @@ Lit Solver::pickBranchLit() {
             next = order_heap.removeMin();
 
     return next == var_Undef ? lit_Undef
-                             : mkLit(next, rnd_pol ? drand(random_seed) < 0.5
+                             : mkLit(next, rnd_pol ? random_state.binomial(0.5)
                                                    : polarity[next]);
 }
 

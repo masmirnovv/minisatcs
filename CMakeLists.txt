@@ -52,6 +52,7 @@ add_library(libminisat STATIC
     minisat/utils/Options.h
     minisat/utils/ParseUtils.h
     minisat/utils/System.h
+    minisat/utils/Random.h
     minisat/simp/SimpSolver.h
 )
 
