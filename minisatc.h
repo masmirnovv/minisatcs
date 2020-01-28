@@ -66,6 +66,10 @@ public:
         setVarPreference(std::abs(x) - 1, p);
     }
 
+    void set_var_name(int x, const char* name) {
+        var_names[std::abs(x) - 1] = name;
+    }
+
     std::vector<int> get_model() const {
         std::vector<int> ret;
         for (int i = 0; i < model.size(); ++i) {

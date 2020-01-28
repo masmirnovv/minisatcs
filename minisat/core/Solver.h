@@ -30,6 +30,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "minisat/utils/Options.h"
 #include "minisat/utils/Random.h"
 
+#include <string>
+#include <unordered_map>
 #include <utility>
 
 namespace Minisat {
@@ -176,6 +178,9 @@ public:
 
     int learntsize_adjust_start_confl;
     double learntsize_adjust_inc;
+
+    //! this can be set for better debug output
+    std::unordered_map<int, std::string> var_names;
 
     // Statistics: (read-only member variable)
     //
@@ -382,7 +387,7 @@ protected:
     double progressEstimate() const;  // DELETE THIS ?? IT'S NOT VERY USEFUL ...
     bool withinBudget() const;
 
-    // Static helpers:
+    // Misc helpers:
     //
 
     //! move lits with known values matching target value to the beginning
@@ -395,6 +400,12 @@ protected:
     //! enqueued values and return false.
     template <bool sel_true>
     bool select_known_and_imply_unknown(CRef cr, Clause& c, int nr_known);
+
+    //! get use-set var name for debug
+    const char* var_name(Var var) {
+        auto iter = var_names.find(var);
+        return iter == var_names.end() ? "" : iter->second.c_str();
+    }
 };
 
 //=================================================================================================

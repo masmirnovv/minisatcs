@@ -28,6 +28,14 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 using namespace Minisat;
 
+#if 0
+#define DEBUG_PRINTF printf
+#else
+#define DEBUG_PRINTF(...) \
+    do {                  \
+    } while (0)
+#endif
+
 //=================================================================================================
 // Options:
 
@@ -490,16 +498,18 @@ Lit Solver::pickBranchLit() {
     }
 
     // Activity based decision:
-    while (next == var_Undef || value(next) != l_Undef || !decision[next])
+    while (next == var_Undef || value(next) != l_Undef || !decision[next]) {
         if (order_heap.empty()) {
-            next = var_Undef;
-            break;
-        } else
+            return lit_Undef;
+        } else {
             next = order_heap.removeMin();
+        }
+    }
 
-    return next == var_Undef ? lit_Undef
-                             : mkLit(next, rnd_pol ? random_state.binomial(0.5)
-                                                   : polarity[next]);
+    bool sign = rnd_pol ? random_state.binomial(0.5) : polarity[next];
+    DEBUG_PRINTF("branch var=%d (%s) sign=%d act=%.3f pref=%d\n", next,
+                 var_name(next), sign, activity[next], var_preference[next]);
+    return mkLit(next, sign);
 }
 
 /*_________________________________________________________________________________________________
@@ -792,6 +802,8 @@ void Solver::uncheckedEnqueue(Lit p, CRef from) {
     assigns[var(p)] = lbool(!sign(p));
     vardata[var(p)] = VarData{from, decisionLevel()};
     trail.push_(p);
+    DEBUG_PRINTF("enqueue var=%d (%s) sign=%d\n", var(p), var_name(var(p)),
+                 sign(p));
 }
 
 void Solver::dequeueUntil(int target_size) {
