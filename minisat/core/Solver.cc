@@ -1336,6 +1336,13 @@ lbool Solver::solve_() {
         printf("|  Number of clauses:    %12d                                  "
                "       |\n",
                nClauses());
+        int nr_pref = 0;
+        for (int i : var_preference) {
+            nr_pref += i != 0;
+        }
+        printf("|  Number of var pref:   %12d                                  "
+               "       |\n",
+               nr_pref);
     }
 
     // first try simplify() for unit propagation
