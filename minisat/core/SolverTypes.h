@@ -98,63 +98,63 @@ static constexpr Lit lit_Error = {-1};  // }
 // Lifted booleans:
 //
 // NOTE: this implementation is optimized for the case when comparisons between
-// values are mostly
-//       between one variable and one constant. Some care had to be taken to
-//       make sure that gcc does enough constant propagation to produce sensible
-//       code, and this appears to be somewhat fragile unfortunately.
+// values are mostly between one variable and one constant. Some care had to be
+// taken to make sure that gcc does enough constant propagation to produce
+// sensible code, and this appears to be somewhat fragile unfortunately.
 
-#define l_True         \
-    (::Minisat::lbool{ \
-            static_cast<uint8_t>(0)})  // gcc does not do constant propagation
-                                       // if these are real constants.
-#define l_False (::Minisat::lbool{static_cast<uint8_t>(1)})
-#define l_Undef (::Minisat::lbool{static_cast<uint8_t>(2)})
+struct lbool_true_type {};
+struct lbool_false_type {};
+struct lbool_undef_type {};
+#define l_True (::Minisat::lbool_true_type{})
+#define l_False (::Minisat::lbool_false_type{})
+#define l_Undef (::Minisat::lbool_undef_type{})
 
 class lbool {
     uint8_t value;
 
+    explicit constexpr lbool(uint8_t v) : value{v} {}
+
 public:
-    explicit constexpr lbool(uint8_t v) : value(v) {}
-
     constexpr lbool() : value(0) {}
-    explicit constexpr lbool(bool x) : value(!x) {}
+    constexpr explicit lbool(bool v) : value{!v} {}
+    constexpr lbool(lbool_true_type) : lbool(true) {}
+    constexpr lbool(lbool_false_type) : lbool(false) {}
+    constexpr lbool(lbool_undef_type) : lbool(static_cast<uint8_t>(2)) {}
 
-    bool operator==(lbool b) const {
-        return ((b.value & 2) & (value & 2)) |
-               (!(b.value & 2) & (value == b.value));
-    }
-    bool operator!=(lbool b) const { return !(*this == b); }
-    lbool operator^(bool b) const {
-        return lbool((uint8_t)(value ^ (uint8_t)b));
-    }
+    template <typename T>
+    lbool(T) = delete;
 
-    lbool operator&&(lbool b) const {
-        uint8_t sel = (this->value << 1) | (b.value << 3);
-        uint8_t v = (0xF7F755F4 >> sel) & 3;
-        return lbool(v);
-    }
+    static constexpr lbool make_raw(uint8_t v) { return lbool{v}; }
 
-    lbool operator||(lbool b) const {
-        uint8_t sel = (this->value << 1) | (b.value << 3);
-        uint8_t v = (0xFCFCF400 >> sel) & 3;
-        return lbool(v);
+    constexpr bool operator==(lbool_true_type) const { return value == 0; }
+    constexpr bool operator==(lbool_false_type) const { return value == 1; }
+    constexpr bool operator==(lbool_undef_type) const { return value & 2; }
+    template <typename T>
+    constexpr bool operator!=(T t) const {
+        return !operator==(t);
     }
 
-    constexpr bool val_is(bool b) const {
+    constexpr lbool operator^(bool b) const {
+        return make_raw(value ^ (uint8_t)b);
+    }
+
+    constexpr bool is_boolv(bool b) const {
         return value == (static_cast<uint8_t>(b) ^ 1);
     }
 
-    constexpr bool is_not_undef() const { return !(value & 2); }
+    template<bool b>
+    constexpr bool is_bool() const {
+        return value == (static_cast<uint8_t>(b) ^ 1);
+    }
 
-    friend int toInt(lbool l);
-    friend lbool toLbool(int v);
+
+    bool as_bool() const {
+        assert(!(value & 2));
+        return value == 0;
+    }
+
+    constexpr bool is_not_undef() const { return !(value & 2); }
 };
-inline int toInt(lbool l) {
-    return l.value;
-}
-inline lbool toLbool(int v) {
-    return lbool((uint8_t)v);
-}
 
 /* ========================== LeqStatus =========================== */
 //! Clause reference type

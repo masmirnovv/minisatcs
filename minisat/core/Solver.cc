@@ -338,7 +338,7 @@ std::optional<bool> Solver::try_leq_clause_const_prop(const vec<Lit>& ps,
             uncheckedEnqueue(val == l_True ? dst : ~dst);
             return ok = (propagate() == CRef_Undef);
         }
-        if (value(dst) == val) {
+        if (value(dst).is_boolv(val.as_bool())) {
             return true;
         }
         return ok = false;
@@ -445,7 +445,7 @@ bool Solver::satisfied(const Clause& c) const {
             } else {
                 return false;
             }
-            return vdst.val_is(vleq);
+            return vdst.is_boolv(vleq);
         }
         return false;
     }
@@ -1020,10 +1020,10 @@ CRef Solver::propagate_leq(Lit new_fact) {
 template <bool sel_true>
 void Solver::select_known_lits(Clause& c, int num) {
     for (int i = 0, j = c.size() - 1; i < num;) {
-        if (value(c[i]).val_is(sel_true)) {
+        if (value(c[i]).is_bool<sel_true>()) {
             ++i;
         } else {
-            while (value(c[j]).val_is(!sel_true)) {
+            while (value(c[j]).is_bool<!sel_true>()) {
                 --j;
                 assert(j > i);
             }
@@ -1042,7 +1042,7 @@ bool Solver::select_known_and_imply_unknown(CRef cr, Clause& c, int nr_known) {
         Lit q = c[i];
         lbool v = value(q);
         if (v.is_not_undef()) {
-            if (v.val_is(sel_true)) {
+            if (v.is_bool<sel_true>()) {
                 ++i;
                 continue;
             }
