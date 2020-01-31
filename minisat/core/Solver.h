@@ -390,7 +390,7 @@ protected:
     // Misc helpers:
     //
 
-    //! move lits with known values matching target value to the beginning
+    //! Move lits with known values matching target value to the beginning
     template <bool sel_true>
     void select_known_lits(Clause& c, int num);
 

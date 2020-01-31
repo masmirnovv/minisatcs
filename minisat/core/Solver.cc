@@ -857,6 +857,7 @@ CRef Solver::propagate() {
             Lit first = c[0];
             Watcher w = Watcher(cr, first);
             if (first != blocker && value(first) == l_True) {
+                // check first != block to avoid a memory lookup when possible
                 *j++ = w;
                 continue;
             }
@@ -1019,16 +1020,20 @@ CRef Solver::propagate_leq(Lit new_fact) {
 
 template <bool sel_true>
 void Solver::select_known_lits(Clause& c, int num) {
-    for (int i = 0, j = c.size() - 1; i < num;) {
+    int size = c.size();
+    for (int i = 0, j = num; i < num;) {
         if (value(c[i]).is_bool<sel_true>()) {
             ++i;
         } else {
+            // Only skip known false lits here; this seems to speed up the
+            // overall search consistently, although I have not found the
+            // reason
             while (value(c[j]).is_bool<!sel_true>()) {
-                --j;
-                assert(j > i);
+                ++j;
+                assert(j < size);
             }
             std::swap(c[i], c[j]);
-            --j;
+            ++j;
         }
     }
 }
@@ -1037,7 +1042,7 @@ template <bool sel_true>
 bool Solver::select_known_and_imply_unknown(CRef cr, Clause& c, int nr_known) {
     int orig_top = trail.size();
     int i = 0, j = c.size() - 1;
-    // c[0:i] are true, and c[i:c.size()] are false
+    // c[0:i] are true, and c[j+1:c.size()] are false
     while (i <= j && i <= nr_known) {
         Lit q = c[i];
         lbool v = value(q);
