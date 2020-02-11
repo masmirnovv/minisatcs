@@ -77,6 +77,10 @@ public:
     T* begin() { return m_data; }
     T* end() { return m_data + m_sz; }
 
+    // Pointer to first element:
+    const T* begin() const { return m_data; }
+    const T* end() const { return m_data + m_sz; }
+
     // Size operations:
     int size() const { return m_sz; }
     void shrink(int nelems) {

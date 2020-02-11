@@ -1,3 +1,4 @@
+#include "minisat/core/Recorder.h"
 #include "minisat/core/Solver.h"
 
 #include <signal.h>
@@ -9,7 +10,15 @@
 #include <thread>
 #include <vector>
 
+class MinisatClauseRecorder : public Minisat::ClauseRecorder {
+public:
+    // concrete solver type
+    void replay(Minisat::Solver& solver) { ClauseRecorder::replay(solver); }
+};
+
 class WrappedMinisatSolver : public Minisat::Solver {
+    MinisatClauseRecorder* m_recorder = nullptr;
+
     class ScopedSolverAssign {
         WrappedMinisatSolver** dst;
 
@@ -21,46 +30,7 @@ class WrappedMinisatSolver : public Minisat::Solver {
         ~ScopedSolverAssign() { *dst = nullptr; }
     };
 
-    class Timer {
-        bool m_canceled = true;
-        double m_timeout;
-        std::function<void()> m_callback;
-        std::thread m_worker;
-        std::condition_variable m_cv;
-        std::mutex m_mtx;
-
-    public:
-        Timer(double timeout, std::function<void()> cb)
-                : m_timeout{timeout}, m_callback{std::move(cb)} {
-            if (timeout > 0) {
-                m_canceled = false;
-                auto work = [this]() {
-                    std::unique_lock<std::mutex> lk{m_mtx};
-                    if (m_canceled) {
-                        return;
-                    }
-                    m_cv.wait_for(lk, std::chrono::duration<double>{m_timeout});
-                    if (!m_canceled) {
-                        m_callback();
-                    }
-                };
-                std::thread t{work};
-                m_worker.swap(t);
-            }
-        }
-        ~Timer() { cancel(); }
-        void cancel() {
-            if (m_canceled) {
-                return;
-            }
-            {
-                std::lock_guard<std::mutex> lg{m_mtx};
-                m_canceled = true;
-                m_cv.notify_one();
-            }
-            m_worker.join();
-        }
-    };
+    class Timer;
 
     int m_new_clause_max_var = 0;
 
@@ -80,6 +50,10 @@ class WrappedMinisatSolver : public Minisat::Solver {
     }
 
 public:
+    void set_recorder(MinisatClauseRecorder* recorder) {
+        m_recorder = recorder;
+    }
+
     void new_clause_prepare() {
         m_new_clause_max_var = 0;
         add_tmp.clear();
@@ -89,6 +63,9 @@ public:
 
     void new_clause_commit() {
         add_vars();
+        if (m_recorder) {
+            m_recorder->add_disjuction(add_tmp);
+        }
         addClause_(add_tmp);
         add_tmp.clear();
     }
@@ -96,6 +73,9 @@ public:
     void new_clause_commit_leq(int bound, int dst) {
         auto dstl = make_lit(dst);
         add_vars();
+        if (m_recorder) {
+            m_recorder->add_leq_assign(add_tmp, bound, dstl);
+        }
         addLeqAssign_(add_tmp, bound, dstl);
         add_tmp.clear();
     }
@@ -103,12 +83,19 @@ public:
     void new_clause_commit_geq(int bound, int dst) {
         auto dstl = make_lit(dst);
         add_vars();
+        if (m_recorder) {
+            m_recorder->add_geq_assign(add_tmp, bound, dstl);
+        }
         addGeqAssign_(add_tmp, bound, dstl);
         add_tmp.clear();
     }
 
     void set_var_preference(int x, int p) {
-        setVarPreference(std::abs(x) - 1, p);
+        int var = std::abs(x) - 1;
+        setVarPreference(var, p);
+        if (m_recorder) {
+            m_recorder->add_var_preference(var, p);
+        }
     }
 
     void set_var_name(int x, const char* name) {
@@ -129,51 +116,94 @@ public:
 
     //! return -1 for timeout, 0 for unsat, 1 for sat. set timeout < 0 to
     //! disable
-    int solve_with_signal(bool setup, double timeout) {
-        static WrappedMinisatSolver* g_solver = nullptr;
-        static auto on_sig = [](int) {
-            if (g_solver) {
-                g_solver->interrupt();
-            }
-        };
-        bool is_tle = false;
-        Timer timer{timeout, [this, &is_tle]() {
-                        is_tle = true;
-                        interrupt();
-                    }};
+    inline int solve_with_signal(bool setup, double timeout);
+};
 
-        clearInterrupt();
-        struct sigaction old_action;
-        ScopedSolverAssign g_solver_assign{&g_solver, this};
-        if (setup) {
-            struct sigaction act;
-            memset(&act, 0, sizeof(act));
-            act.sa_handler = on_sig;
-            if (sigaction(SIGINT, &act, &old_action)) {
-                char msg[1024];
-                snprintf(msg, sizeof(msg), "failed to setup signal handler: %s",
-                         strerror(errno));
-                throw std::runtime_error{msg};
-            }
+class WrappedMinisatSolver::Timer {
+    bool m_canceled = true;
+    double m_timeout;
+    std::function<void()> m_callback;
+    std::thread m_worker;
+    std::condition_variable m_cv;
+    std::mutex m_mtx;
+
+public:
+    Timer(double timeout, std::function<void()> cb)
+            : m_timeout{timeout}, m_callback{std::move(cb)} {
+        if (timeout > 0) {
+            m_canceled = false;
+            auto work = [this]() {
+                std::unique_lock<std::mutex> lk{m_mtx};
+                if (m_canceled) {
+                    return;
+                }
+                m_cv.wait_for(lk, std::chrono::duration<double>{m_timeout});
+                if (!m_canceled) {
+                    m_callback();
+                }
+            };
+            std::thread t{work};
+            m_worker.swap(t);
         }
-        budgetOff();
-        assumptions.clear();
-        auto ret = solve_();
-        if (sigaction(SIGINT, &old_action, nullptr)) {
+    }
+    ~Timer() { cancel(); }
+    void cancel() {
+        if (m_canceled) {
+            return;
+        }
+        {
+            std::lock_guard<std::mutex> lg{m_mtx};
+            m_canceled = true;
+            m_cv.notify_one();
+        }
+        m_worker.join();
+    }
+};
+
+int WrappedMinisatSolver::solve_with_signal(bool setup, double timeout) {
+    static WrappedMinisatSolver* g_solver = nullptr;
+    static auto on_sig = [](int) {
+        if (g_solver) {
+            g_solver->interrupt();
+        }
+    };
+    bool is_tle = false;
+    Timer timer{timeout, [this, &is_tle]() {
+                    is_tle = true;
+                    interrupt();
+                }};
+
+    clearInterrupt();
+    struct sigaction old_action;
+    ScopedSolverAssign g_solver_assign{&g_solver, this};
+    if (setup) {
+        struct sigaction act;
+        memset(&act, 0, sizeof(act));
+        act.sa_handler = on_sig;
+        if (sigaction(SIGINT, &act, &old_action)) {
             char msg[1024];
-            snprintf(msg, sizeof(msg), "failed to restore signal handler: %s",
+            snprintf(msg, sizeof(msg), "failed to setup signal handler: %s",
                      strerror(errno));
             throw std::runtime_error{msg};
         }
-
-        if (is_tle) {
-            return -1;
-        }
-
-        if (ret.is_not_undef()) {
-            return ret == l_True;
-        }
-        throw std::runtime_error("computation interrupted");
     }
-};
+    budgetOff();
+    assumptions.clear();
+    auto ret = solve_();
+    if (sigaction(SIGINT, &old_action, nullptr)) {
+        char msg[1024];
+        snprintf(msg, sizeof(msg), "failed to restore signal handler: %s",
+                 strerror(errno));
+        throw std::runtime_error{msg};
+    }
+
+    if (is_tle) {
+        return -1;
+    }
+
+    if (ret.is_not_undef()) {
+        return ret == l_True;
+    }
+    throw std::runtime_error("computation interrupted");
+}
 
