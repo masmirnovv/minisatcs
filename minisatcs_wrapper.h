@@ -92,6 +92,9 @@ public:
 
     void set_var_preference(int x, int p) {
         int var = std::abs(x) - 1;
+        while (nVars() <= var) {
+            newVar();
+        }
         setVarPreference(var, p);
         if (m_recorder) {
             m_recorder->add_var_preference(var, p);
@@ -105,9 +108,9 @@ public:
     std::vector<int> get_model() const {
         std::vector<int> ret;
         for (int i = 0; i < model.size(); ++i) {
-            if (model[i] == l_True) {
+            if (model[i] == Minisat::l_True) {
                 ret.push_back(i + 1);
-            } else if (model[i] == l_False) {
+            } else if (model[i] == Minisat::l_False) {
                 ret.push_back(-i - 1);
             }
         }
@@ -202,7 +205,7 @@ int WrappedMinisatSolver::solve_with_signal(bool setup, double timeout) {
     }
 
     if (ret.is_not_undef()) {
-        return ret == l_True;
+        return ret.as_bool();
     }
     throw std::runtime_error("computation interrupted");
 }

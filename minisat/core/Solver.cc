@@ -20,11 +20,13 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 **************************************************************************************************/
 
-#include <math.h>
-
 #include "minisat/core/Solver.h"
 #include "minisat/mtl/Sort.h"
+#include "minisat/utils/Options.h"
 #include "minisat/utils/System.h"
+
+#include <algorithm>
+#include <cmath>
 
 using namespace Minisat;
 
@@ -88,7 +90,9 @@ struct Solver::LeqWatcher {
     //! sign of this var in LEQ
     uint32_t sign : 1;
     //! number of lits in the LEQ
-    uint32_t size : 16;
+    uint32_t size : 15;
+    //! whether this var is used as dst; if true, then sign is no use
+    uint32_t is_dst : 1;
 
     CRef cref;
 
@@ -108,21 +112,222 @@ struct Solver::LeqWatcher {
     int bound_false() const { return size - bound; }
 };
 
+bool Solver::WatcherRefreshLeq::operator()(LeqWatcher& w) const {
+    const Clause& c = ca[w.cref];
+    if (c.mark() == 1) {
+        // clause has been deleted
+        return true;
+    }
+    // refresh size and bound to handle clause shrink
+    if (w.size != c.size()) {
+        w.bound = c.leq_bound();
+        w.size = c.size();
+    }
+    return false;
+}
+
 /* ================== LeqStatusModLog ================== */
 //! modification log of LeqStatus
 struct Solver::LeqStatusModLog {
     //! whether nr_true in the status is added
     uint32_t is_true : 1;
+    //! whether this var is dst; if set to true, then stat counter should not be
+    //! modified
+    uint32_t is_dst : 1;
 
     //! if set to 1, imply_type should be cleared during unwinding
     uint32_t imply_type_clear : 1;
 
-    CRef status_ref : 30;
+    CRef status_ref : 29;
 
     LeqStatus& status(ClauseAllocator& ca) const {
         return *ca.lea_as<LeqStatus>(status_ref);
     }
 };
+
+/* ================== DeadVarRemover ================== */
+
+void DeadVarRemover::add_to_remove_if_safe(RefCnt& cnt, Var var) {
+    if (cnt.safe_to_remove()) {
+        m_to_remove.push(var);
+        // avoid enqueueing a var twice
+        cnt.tot = -1;
+    }
+}
+
+void DeadVarRemover::incr_refcnt(CRef cref) {
+    const Clause& c = m_solver->ca[cref];
+    RefCnt* ptr = m_var_refcnt.data();
+    if (c.is_leq()) {
+        Var v = var(c.leq_dst());
+        ++ptr[v].tot;
+        ++ptr[v].removable;
+        m_var2cref.push_back({v, cref});
+
+        for (int i = 0, it = c.size(); i < it; ++i) {
+            Var v = var(c[i]);
+            ++ptr[v].tot;
+        }
+    } else {
+        for (int i = 0, it = c.size(); i < it; ++i) {
+            Var v = var(c[i]);
+            ++ptr[v].tot;
+            ++ptr[v].removable;
+            m_var2cref.push_back({v, cref});
+        }
+    }
+}
+
+void DeadVarRemover::remove_clause_and_decr_refcnt(Var src_var, CRef cref) {
+    const Clause& c = m_solver->ca[cref];
+    if (c.mark() == 1) {
+        // already removed
+        assert(!c.is_leq());
+        // make the var to be false by default
+        m_solver->uncheckedEnqueue(mkLit(src_var));
+        return;
+    }
+    RefCnt* ptr = m_var_refcnt.data();
+    if (c.is_leq()) {
+        Var v = var(c.leq_dst());
+        assert(v == src_var);
+
+        m_leq_to_fix.emplace_back();
+        auto&& dst = m_leq_to_fix.back();
+
+        for (int i = 0, it = c.size(); i < it; ++i) {
+            Var v = var(c[i]);
+            --ptr[v].tot;
+            add_to_remove_if_safe(ptr[v], v);
+            dst.lits.push(c[i]);
+        }
+        dst.bound = c.leq_bound();
+        dst.dst = c.leq_dst();
+
+        // dst would be inferred in fix_var_assignments()
+        m_solver->setDecisionVar(var(dst.dst), false);
+        lbool& val = m_solver->assigns[var(dst.dst)];
+        assert(val == l_Undef);
+        // assign a sentinel value so it can be skipped by future dead var
+        // removal scans
+        val = l_Invalid;
+    } else {
+        int found = 0;
+        for (int i = 0, it = c.size(); i < it; ++i) {
+            Var v = var(c[i]);
+            if (v == src_var) {
+                ++found;
+                // ensure the clause is true by assining the var a value
+                m_solver->uncheckedEnqueue(c[i]);
+            } else {
+                --ptr[v].tot;
+                --ptr[v].removable;
+                add_to_remove_if_safe(ptr[v], v);
+            }
+        }
+        assert(found == 1);
+    }
+    m_solver->removeClause(cref);
+}
+
+std::optional<CRef> DeadVarRemover::find_remaining_cref(Var var) const {
+    // this function should be called at most once for each var, and therefore
+    // its amortized run time is linear
+    auto end = m_var2cref.end();
+    auto iter = std::lower_bound(m_var2cref.begin(), end,
+                                 std::make_pair(var, static_cast<CRef>(0)));
+    std::optional<CRef> ret = std::nullopt;
+    auto&& ca = m_solver->ca;
+    while (iter != end && iter->first == var) {
+        if (!ca[iter->second].mark()) {
+            assert(!ret.has_value());
+            ret = iter->second;
+        }
+        ++iter;
+    }
+    return ret;
+}
+
+void DeadVarRemover::clean_removed(vec<CRef>& cs) {
+    auto&& ca = m_solver->ca;
+    int i, j;
+    for (i = j = 0; i < cs.size(); i++) {
+        Clause& c = ca[cs[i]];
+        if (!c.mark()) {
+            cs[j++] = cs[i];
+        }
+    }
+    cs.shrink(i - j);
+}
+
+void DeadVarRemover::simplify() {
+    if (!m_enabled) {
+        return;
+    }
+    assert(m_solver->decisionLevel() == 0);
+    m_var2cref.clear();
+    m_to_remove.clear();
+    int nr_var = m_solver->nVars();
+    m_var_refcnt.growTo(nr_var);
+    m_var2cref.reserve(nr_var * 3);
+    m_to_remove.capacity(nr_var);
+
+    memset(m_var_refcnt.data(), 0, sizeof(RefCnt) * nr_var);
+
+    for (auto i : m_solver->clauses) {
+        incr_refcnt(i);
+    }
+    for (auto i : m_solver->learnts) {
+        incr_refcnt(i);
+    }
+    std::sort(m_var2cref.begin(), m_var2cref.end());
+
+    RefCnt* refcnt = m_var_refcnt.data();
+    const lbool* assigns = m_solver->assigns.data();
+    for (int i = 0; i < nr_var; ++i) {
+        if (assigns[i] != l_Undef) {
+            // ensure that assigned vars would never be considered for removal
+            refcnt[i].tot = -1;
+        } else {
+            add_to_remove_if_safe(refcnt[i], i);
+        }
+    }
+
+    for (int qh = 0; qh < m_to_remove.size();) {
+        Var var = m_to_remove[qh++];
+        if (auto cref_opt = find_remaining_cref(var); cref_opt.has_value()) {
+            remove_clause_and_decr_refcnt(var, cref_opt.value());
+        } else {
+            // var is not used in a clause, so it can take any value
+            m_solver->uncheckedEnqueue(mkLit(var));
+        }
+    }
+
+    clean_removed(m_solver->clauses);
+    clean_removed(m_solver->learnts);
+}
+
+void DeadVarRemover::fix_var_assignments() {
+    // reverse order is the correct topological order for assigning
+    for (int i = static_cast<int>(m_leq_to_fix.size()) - 1; i >= 0; --i) {
+        auto&& clause = m_leq_to_fix[i];
+        int cnt = 0;
+        for (Lit l : clause.lits) {
+            auto val = m_solver->value(l);
+            assert(val.is_not_undef());
+            cnt += (val == l_True);
+        }
+        Lit dst = clause.dst;
+        if (cnt > clause.bound) {
+            dst = ~dst;
+        }
+        lbool& val = m_solver->assigns[var(dst)];
+        assert(val == l_Invalid);
+        val = l_Undef;
+        m_solver->uncheckedEnqueue(dst);
+    }
+    m_leq_to_fix.clear();
+}
 
 //=================================================================================================
 // Constructor/Destructor:
@@ -201,6 +406,29 @@ Solver::Solver()
 
 Solver::~Solver() = default;
 
+/* ================== setters ================== */
+
+void Solver::setDecisionVar(Var v, bool b) {
+    minisat_uassert(v < nVars(), "var=%d nVars=%d", v, nVars());
+    if (b && !decision[v])
+        dec_vars++;
+    else if (!b && decision[v])
+        dec_vars--;
+
+    decision[v] = b;
+    insertVarOrder(v);
+}
+
+void Solver::setVarPreference(Var v, int p) {
+    minisat_uassert(v < nVars(), "var=%d nVars=%d", v, nVars());
+    var_preference[v] = p;
+}
+
+void Solver::setPolarity(Var v, bool b) {
+    minisat_uassert(v < nVars(), "var=%d nVars=%d", v, nVars());
+    polarity[v] = b;
+}
+
 //=================================================================================================
 // Minor methods:
 
@@ -235,6 +463,8 @@ bool Solver::addClause_(vec<Lit>& ps) {
     Lit p;
     int i, j;
     for (i = j = 0, p = lit_Undef; i < ps.size(); i++) {
+        minisat_uassert(var(ps[i]) < nVars(), "var=%d nVars=%d", var(ps[i]),
+                        nVars());
         if (value(ps[i]) == l_True || ps[i] == ~p)
             return true;
         else if (value(ps[i]) != l_False && ps[i] != p)
@@ -256,40 +486,33 @@ bool Solver::addClause_(vec<Lit>& ps) {
     return true;
 }
 
+template <bool src_neg>
+bool Solver::addClauseReifiedConjunction(Lit dst, const Lit* src, int size) {
+    static_assert(src_neg == 0 || src_neg == 1);
+    for (int i = 0; i < size; ++i) {
+        if (!addClause(~dst, src[i] ^ src_neg)) {
+            return false;
+        }
+    }
+    add_tmp.clear();
+    add_tmp.push(dst);
+    for (int i = 0; i < size; ++i) {
+        add_tmp.push(src[i] ^ (!src_neg));
+    }
+    return addClause_(add_tmp);
+}
+
 bool Solver::addLeqAssign_(vec<Lit>& ps, int bound, Lit dst) {
     assert(decisionLevel() == 0);
     if (!ok)
         return false;
 
     canonize_leq_clause(ps, bound);
-
+    minisat_uassert(var(dst) < nVars(), "var=%d nVars=%d", var(dst), nVars());
     if (auto r = try_leq_clause_const_prop(ps, dst, bound); r.has_value()) {
         return r.value();
     }
-    if (bound == 0) {
-        // We do not add watchers on dst, so we handle the case when bound is
-        // zero because dst = 1 can imply all lits in this case
-        vec<Lit> tmp;
-        ps.copyTo(tmp);
-        ps.push(dst);
-        if (!addClause_(ps)) {
-            return false;
-        }
-        for (Lit i : tmp) {
-            if (!addClause(~i, ~dst)) {
-                return false;
-            }
-        }
-        return true;
-    }
-    assert(1 <= bound && bound < ps.size());
-
-    if (ps.size() == 1) {
-        Lit a = dst, b = ~ps[0];
-        // now the constraint is a == b
-        return addClause(~a, b) && addClause(~b, a);
-    }
-
+    assert(0 <= bound && bound < ps.size());
     add_leq_and_setup_watchers(ps, dst, bound);
     return true;
 }
@@ -299,6 +522,8 @@ void Solver::canonize_leq_clause(vec<Lit>& ps, int& bound) {
     Lit p;
     int i, j;
     for (i = j = 0, p = lit_Undef; i < ps.size(); i++) {
+        minisat_uassert(var(ps[i]) < nVars(), "var=%d nVars=%d", var(ps[i]),
+                        nVars());
         if (value(ps[i]) == l_True) {
             --bound;
             continue;
@@ -347,9 +572,9 @@ std::optional<bool> Solver::try_leq_clause_const_prop(const vec<Lit>& ps,
 }
 
 void Solver::add_leq_and_setup_watchers(vec<Lit>& ps, Lit dst, int bound) {
-    if (ps.size() >= (1 << 14) - 10) {
-        throw std::runtime_error{"LEQ too large"};
-    }
+    constexpr int MAX_LEQ_SIZE = (1 << 14) - 10;
+    minisat_uassert(ps.size() < MAX_LEQ_SIZE, "LEQ too large: get %d, max %d",
+                    ps.size(), MAX_LEQ_SIZE);
     CRef cr = ca.alloc(ps, false, dst, bound);
     clauses.push(cr);
     assert(ca.ael(&ca[cr].leq_status()) - cr ==
@@ -364,9 +589,22 @@ void Solver::add_leq_and_setup_watchers(vec<Lit>& ps, Lit dst, int bound) {
                 .bound = static_cast<uint32_t>(bound),
                 .sign = sign(p),
                 .size = static_cast<uint32_t>(ps.size()),
+                .is_dst = 0,
                 .cref = cr,
         };
         leq_watches[var(p)].push(watcher);
+    }
+
+    {
+        // watcher for dst
+        LeqWatcher watcher = {
+                .bound = static_cast<uint32_t>(bound),
+                .sign = 0,
+                .size = static_cast<uint32_t>(ps.size()),
+                .is_dst = 1,
+                .cref = cr,
+        };
+        leq_watches[var(dst)].push(watcher);
     }
 
     clauses_literals += ps.size() + 1;
@@ -408,18 +646,19 @@ void Solver::detachClause(CRef cr, bool strict) {
 void Solver::removeClause(CRef cr) {
     Clause& c = ca[cr];
     if (c.is_leq()) {
-        auto remove_self_reason_ref = [this, cr](Var var) {
+        auto fix_refs = [this, cr](Var var) {
+            // remove watcher
+            leq_watches.smudge(var);
+            // remove self reason reference
             CRef& reason = vardata[var].reason;
             if (reason == cr) {
                 reason = CRef_Undef;
             }
         };
         for (int i = 0, it = c.size(); i < it; ++i) {
-            Var v = var(c[i]);
-            leq_watches.smudge(v);
-            remove_self_reason_ref(v);
+            fix_refs(var(c[i]));
         }
-        remove_self_reason_ref(var(c.leq_dst()));
+        fix_refs(var(c.leq_dst()));
         clauses_literals -= c.size() + 1;
     } else {
         detachClause(cr);
@@ -436,6 +675,13 @@ bool Solver::satisfied(const Clause& c) const {
         auto vdst = value(c.leq_dst());
         if (vdst.is_not_undef()) {
             LeqStatus s = c.leq_status();
+            if (s.imply_type) {
+                // implication due to unit propagation from initial values
+                assert(s.imply_type == LeqStatus::IMPLY_DST ||
+                       s.imply_type == LeqStatus::IMPLY_LITS);
+                assert(!decisionLevel());
+                return true;
+            }
             int bound = c.leq_bound();
             bool vleq;
             if (s.nr_true >= bound + 1) {
@@ -472,7 +718,9 @@ void Solver::cancelUntil(int level) {
         for (int i = trail_leq_stat.size() - 1; i >= sep.leq; --i) {
             LeqStatusModLog log = trail_leq_stat[i];
             LeqStatus& s = log.status(ca);
-            s.decr(log.is_true, 1);
+            if (!log.is_dst) {
+                s.decr(log.is_true, 1);
+            }
             s.clear_imply_type_with(log.imply_type_clear);
         }
 
@@ -909,23 +1157,31 @@ CRef Solver::propagate_leq(Lit new_fact) {
             __builtin_prefetch(&watcher_list[watcher_idx + 3].status(ca), 1, 1);
             __builtin_prefetch(&watcher_list[watcher_idx + 4].status(ca), 1, 1);
         }
-        LeqWatcher watch = watcher_list[watcher_idx];
+        const LeqWatcher watch = watcher_list[watcher_idx];
         LeqStatus& stat = watch.status(ca);
         if (stat.imply_type) {
             // already used for implication, skip this clause
             continue;
         }
 
-        if (watch.status_ref() >= (1u << 30)) {
-            throw std::runtime_error{"status ref addr too large"};
-        }
-
+        minisat_uassert(watch.status_ref() < (1u << 29),
+                        "status ref addr too large");
         LeqStatusModLog mod_log{
                 .is_true = static_cast<uint32_t>(fact_is_true ^ watch.sign),
+                .is_dst = watch.is_dst,
                 .imply_type_clear = 0,
                 .status_ref = watch.status_ref()};
 
-        stat.incr(mod_log.is_true, 1);
+        if (!watch.is_dst) {
+            stat.incr(mod_log.is_true, 1);
+        }
+
+#define COMMIT_MOD_LOG()                                   \
+    do {                                                   \
+        if (!mod_log.is_dst || mod_log.imply_type_clear) { \
+            trail_leq_stat.push(mod_log);                  \
+        }                                                  \
+    } while (0)
 
 #define SETUP_IMPLY(pre, type)        \
     do {                              \
@@ -937,7 +1193,7 @@ CRef Solver::propagate_leq(Lit new_fact) {
 #define RETURN_ON_CONFL(imply_pre)                      \
     do {                                                \
         SETUP_IMPLY(imply_pre, LeqStatus::IMPLY_CONFL); \
-        trail_leq_stat.push(mod_log);                   \
+        COMMIT_MOD_LOG();                               \
         qhead = trail.size();                           \
         return cref;                                    \
     } while (0)
@@ -947,7 +1203,7 @@ CRef Solver::propagate_leq(Lit new_fact) {
 
         if (nr_true < bound_true - 1 && nr_false < bound_false - 1) {
             // nothing can be implied in this case
-            trail_leq_stat.push(mod_log);
+            COMMIT_MOD_LOG();
             continue;
         }
 
@@ -971,8 +1227,10 @@ CRef Solver::propagate_leq(Lit new_fact) {
                         // push the log of the newly found var (which must be an
                         // unprocessed var in the queue)
                         stat.incr(1, 1);
-                        LeqStatusModLog tmp = mod_log;
-                        tmp.is_true = 1;
+                        LeqStatusModLog tmp{.is_true = 1,
+                                            .is_dst = 0,
+                                            .imply_type_clear = 0,
+                                            .status_ref = mod_log.status_ref};
                         trail_leq_stat.push(tmp);
                         RETURN_ON_CONFL(1);
                     }
@@ -990,8 +1248,10 @@ CRef Solver::propagate_leq(Lit new_fact) {
                         SETUP_IMPLY(0, LeqStatus::IMPLY_LITS);
                     } else {
                         stat.incr(0, 1);
-                        LeqStatusModLog tmp = mod_log;
-                        tmp.is_true = 0;
+                        LeqStatusModLog tmp{.is_true = 0,
+                                            .is_dst = 0,
+                                            .imply_type_clear = 0,
+                                            .status_ref = mod_log.status_ref};
                         trail_leq_stat.push(tmp);
                         RETURN_ON_CONFL(0);
                     }
@@ -1011,11 +1271,13 @@ CRef Solver::propagate_leq(Lit new_fact) {
             }
         }
 
-        trail_leq_stat.push(mod_log);
-#undef SETUP_IMPLY
-#undef RETURN_ON_CONFL
+        COMMIT_MOD_LOG();
     }
     return CRef_Undef;
+
+#undef COMMIT_MOD_LOG
+#undef SETUP_IMPLY
+#undef RETURN_ON_CONFL
 }
 
 template <bool sel_true>
@@ -1086,6 +1348,7 @@ struct reduceDB_lt {
                (ca[y].size() == 2 || ca[x].activity() < ca[y].activity());
     }
 };
+
 void Solver::reduceDB() {
     int i, j;
     double extra_lim =
@@ -1110,10 +1373,11 @@ void Solver::removeSatisfied(vec<CRef>& cs) {
     int i, j;
     for (i = j = 0; i < cs.size(); i++) {
         Clause& c = ca[cs[i]];
-        if (satisfied(c))
+        if (satisfied(c) || try_leq_simplify(c)) {
             removeClause(cs[i]);
-        else
+        } else {
             cs[j++] = cs[i];
+        }
     }
     cs.shrink(i - j);
 }
@@ -1146,16 +1410,24 @@ bool Solver::simplify() {
 
     // Remove satisfied clauses:
     removeSatisfied(learnts);
-    if (remove_satisfied) {
-        // controlled by an option that can be turned off
 
+    if (remove_satisfied && propagations >= next_remove_satisfied_nr_prop) {
         removeSatisfied(clauses);
+
+        if (!next_remove_satisfied_nr_prop) {
+            // only remove dead vars at the beginning
+            dead_var_remover.simplify();
+        }
+
         // we will never need to backtrace below 0, so it's safe to clear the
         // stats; this is also necessary because their pointers to stat would
         // become dangling after garbage collection
         trail_leq_stat.clear();
+
         // remove watchers on removed clauses
         leq_watches.cleanAll();
+
+        next_remove_satisfied_nr_prop = propagations + 300000;
     }
     checkGarbage();
     rebuildOrderHeap();
@@ -1166,6 +1438,53 @@ bool Solver::simplify() {
                                       // it will do for now)
 
     return true;
+}
+
+bool Solver::try_leq_simplify(Clause& c) {
+    if (!c.is_leq()) {
+        return false;
+    }
+    LeqStatus& stat = c.leq_status();
+    assert(!stat.imply_type);
+    int bound = c.leq_bound() - stat.nr_true;
+    int size = c.size() - stat.nr_decided;
+
+    assert(0 <= bound && bound < size);
+
+    if (stat.nr_decided) {
+        // shrink to keep only undecided lits
+        int wr = 0;
+        for (int i = 0; i < c.size(); ++i) {
+            if (value(c[i]) == l_Undef) {
+                c[wr++] = c[i];
+            }
+        }
+        assert(wr == size);
+    }
+
+    if (bound == 0) {
+        // equivalent to dst = ~(p0 | p1 | ...)
+        addClauseReifiedConjunction<true>(c.leq_dst(), c.lit_data(), size);
+        return true;
+    }
+    if (bound == size - 1) {
+        // equivalent to dst = ~(p0 & p1 & ...)
+        addClauseReifiedConjunction<false>(~c.leq_dst(), c.lit_data(), size);
+        return true;
+    }
+
+    if (stat.nr_decided) {
+        clauses_literals -= stat.nr_decided;
+        ca.RegionAllocator<uint32_t>::free(stat.nr_decided);
+        for (int i = 0; i < size; ++i) {
+            leq_watches.smudge(var(c[i]));
+        }
+        leq_watches.smudge(var(c.leq_dst()));
+        stat.nr_decided = stat.nr_true = 0;
+        c.shrink_leq_to(size, bound);
+    }
+
+    return false;
 }
 
 /*_________________________________________________________________________________________________
@@ -1267,12 +1586,13 @@ lbool Solver::search(int nof_conflicts) {
 
             if (next == lit_Undef) {
                 // New variable decision:
-                decisions++;
                 next = pickBranchLit();
-
-                if (next == lit_Undef)
+                if (next == lit_Undef) {
                     // Model found:
                     return l_True;
+                }
+
+                decisions++;
             }
 
             // Increase decision level and enqueue 'next'
@@ -1338,9 +1658,9 @@ lbool Solver::solve_() {
         printf("|  Number of variables:  %12d                                  "
                "       |\n",
                nVars());
-        printf("|  Number of clauses:    %12d                                  "
+        printf("|  Number of clauses:    %12d/%d                               "
                "       |\n",
-               nClauses());
+               nClauses(), nLeqClauses());
         int nr_pref = 0;
         for (int i : var_preference) {
             nr_pref += i != 0;
@@ -1354,9 +1674,9 @@ lbool Solver::solve_() {
     {
         bool simplify_result = simplify();
         if (verbosity > 0) {
-            printf("|  Simplified: (result=%d)%12d                             "
+            printf("|  Simplified: (result=%d)%12d/%d                          "
                    "            |\n",
-                   simplify_result, nClauses());
+                   simplify_result, nClauses(), nLeqClauses());
         }
         if (!simplify_result) {
             return l_False;
@@ -1412,9 +1732,11 @@ lbool Solver::solve_() {
 
     if (status == l_True) {
         // Extend & copy model:
+        dead_var_remover.fix_var_assignments();
         model.growTo(nVars());
-        for (int i = 0; i < nVars(); i++)
+        for (int i = 0; i < nVars(); i++) {
             model[i] = value(i);
+        }
     } else if (status == l_False && conflict.size() == 0)
         ok = false;
 
@@ -1565,4 +1887,12 @@ void Solver::garbageCollect() {
                to.size() * ClauseAllocator::Unit_Size);
     }
     to.moveTo(ca);
+}
+
+int Solver::nLeqClauses() const {
+    int ret = 0;
+    for (CRef i : clauses) {
+        ret += ca[i].is_leq();
+    }
+    return ret;
 }

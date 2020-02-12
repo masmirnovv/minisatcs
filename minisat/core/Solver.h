@@ -27,7 +27,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "minisat/mtl/Alg.h"
 #include "minisat/mtl/Heap.h"
 #include "minisat/mtl/Vec.h"
-#include "minisat/utils/Options.h"
 #include "minisat/utils/Random.h"
 
 #include <string>
@@ -38,6 +37,62 @@ namespace Minisat {
 
 //=================================================================================================
 // Solver -- the main class:
+
+class Solver;
+
+//! remove vars and corresponding clauses that are referenced by at most one
+//! clause
+class DeadVarRemover {
+    //! refcnt of a single var
+    struct RefCnt {
+        // tot refcnt: total number of clauses referring to this var
+        int tot;
+        //! removable references to this var: disjunctive clause or dst of leq
+        //! assign
+        int removable;
+
+        bool safe_to_remove() const {
+            return !tot || (tot == 1 && removable == 1);
+        }
+    };
+    struct LeqRec {
+        vec<Lit> lits;
+        int bound;
+        Lit dst;
+    };
+
+    Solver* const m_solver;
+    bool m_enabled = true;
+    vec<RefCnt> m_var_refcnt;
+    //! vars and corresponding clauses that reference it
+    std::vector<std::pair<Var, CRef>> m_var2cref;
+    //! queue of vars to be removed
+    vec<Var> m_to_remove;
+    std::vector<LeqRec> m_leq_to_fix;
+
+    inline void incr_refcnt(CRef cref);
+    inline void remove_clause_and_decr_refcnt(Var src_var, CRef cref);
+
+    //! try to find the remaining unremoved cref to a var
+    inline std::optional<CRef> find_remaining_cref(Var var) const;
+
+    //! if cnt indicates that var is safe to be removed, then add it to the
+    //! queue
+    inline void add_to_remove_if_safe(RefCnt& cnt, Var var);
+
+    void clean_removed(vec<CRef>& cs);
+
+public:
+    explicit DeadVarRemover(Solver* solver) : m_solver{solver} {}
+
+    void disable() { m_enabled = false; }
+
+    void simplify();
+
+    //! to be called after a solution is found, so assignments of removed vars
+    //! can be fixed
+    void fix_var_assignments();
+};
 
 class Solver {
 public:
@@ -61,6 +116,9 @@ public:
     bool addClause_(vec<Lit>& ps);  // Add a clause to the solver without making
                                     // superflous internal copy. Will change the
                                     // passed vector 'ps'.
+    //! add dst = (src[0]^src_neg) & (src[1]^src_neg) & ...
+    template <bool src_neg = false>
+    bool addClauseReifiedConjunction(Lit dst, const Lit* src, int size);
 
     //! Add dst = (sum(ps) <= bound) to the solver
     bool addLeqAssign_(vec<Lit>& ps, int bound, Lit dst);
@@ -72,7 +130,8 @@ public:
 
     // Solving:
     //
-    bool simplify();                      // Removes already satisfied clauses.
+    // Removes already satisfied clauses.
+    bool simplify();
     bool solve(const vec<Lit>& assumps);  // Search for a model that respects a
                                           // given set of assumptions.
     lbool solveLimited(
@@ -103,10 +162,10 @@ public:
     //
     //! Declare which polarity the decision heuristic should use for a variable.
     //! Requires mode 'polarity_user'
-    void setPolarity(Var v, bool b) { polarity[v] = b; }
+    void setPolarity(Var v, bool b);
     //! set var preference to break ties with equal activity; less value means
     //! preferred
-    void setVarPreference(Var v, int p) { var_preference[v] = p; }
+    void setVarPreference(Var v, int p);
     //! Declare if a variable should be eligible for selection in the decision
     //! heuristic.
     void setDecisionVar(Var v, bool b);
@@ -123,8 +182,9 @@ public:
                            // call to solve must have been satisfiable.
     int nAssigns() const;  // The current number of assigned literals.
     int nClauses() const;  // The current number of original clauses.
-    int nLearnts() const;  // The current number of learnt clauses.
-    int nVars() const;     // The current number of variables.
+    int nLeqClauses() const;  // The current number of original LEQ clauses.
+    int nLearnts() const;     // The current number of learnt clauses.
+    int nVars() const;        // The current number of variables.
     int nFreeVars() const;
 
     // Resource contraints:
@@ -217,14 +277,19 @@ protected:
         int lit, leq;
     };
 
-    template <class WatcherT>
-    struct WatcherDeleted {
+    struct WatcherRefreshDisj {
         const ClauseAllocator& ca;
-        WatcherDeleted(const ClauseAllocator& _ca) : ca(_ca) {}
+        WatcherRefreshDisj(const ClauseAllocator& _ca) : ca(_ca) {}
 
-        bool operator()(const WatcherT& w) const {
+        bool operator()(const Watcher& w) const {
             return ca[w.cref].mark() == 1;
         }
+    };
+    struct WatcherRefreshLeq {
+        const ClauseAllocator& ca;
+        WatcherRefreshLeq(const ClauseAllocator& _ca) : ca(_ca) {}
+
+        inline bool operator()(LeqWatcher& w) const;
     };
 
     class VarOrderLt {
@@ -250,9 +315,9 @@ protected:
     double var_inc;  // Amount to bump next variable with.
     //! 'watches[lit]' is a list of constraints watching 'lit' (will go there if
     //! literal becomes true).
-    OccLists<Lit, vec<Watcher>, WatcherDeleted<Watcher>> watches;
+    OccLists<Lit, vec<Watcher>, WatcherRefreshDisj> watches;
     //! constraints watching a var, triggered when it is decided
-    OccLists<Var, vec<LeqWatcher>, WatcherDeleted<LeqWatcher>> leq_watches;
+    OccLists<Var, vec<LeqWatcher>, WatcherRefreshLeq> leq_watches;
     vec<lbool> assigns;  // The current assignments.
     vec<char> polarity;  // The preferred polarity of each variable.
     vec<char> decision;  // Declares if a variable is eligible for selection in
@@ -278,6 +343,9 @@ protected:
     bool remove_satisfied;  // Indicates whether possibly inefficient linear
                             // scan for satisfied clauses should be performed in
                             // 'simplify'.
+    //! ensure that global scan would not occur too frequently by requring a
+    //! minimum number of propagations
+    uint64_t next_remove_satisfied_nr_prop = 0;
 
     ClauseAllocator ca;
 
@@ -300,7 +368,10 @@ protected:
     int64_t propagation_budget;  // -1 means no budget.
     volatile bool asynch_interrupt;
 
+    // Encapsulated objects
     RandomState random_state;
+    friend class DeadVarRemover;
+    DeadVarRemover dead_var_remover{this};
 
     // Main internal methods:
     //
@@ -371,8 +442,11 @@ protected:
     //! Check if a clause is a reason for some implication in the current state.
     //! This function should only be called on disjunction clauses
     bool locked_disj(const Clause& c) const;
-    bool satisfied(const Clause& c) const;  // Returns TRUE if a clause is
-                                            // satisfied in the current state.
+    //! return whether the clause is satisified given current assignments
+    bool satisfied(const Clause& c) const;
+    //! try to simplify an LEQ clause; return whether the original clause should
+    //! be removed
+    bool try_leq_simplify(Clause& c);
 
     void relocAll(ClauseAllocator& to);
 
@@ -402,7 +476,7 @@ protected:
     bool select_known_and_imply_unknown(CRef cr, Clause& c, int nr_known);
 
     //! get use-set var name for debug
-    const char* var_name(Var var) {
+    const char* var_name(Var var) const {
         auto iter = var_names.find(var);
         return iter == var_names.end() ? "" : iter->second.c_str();
     }
@@ -435,6 +509,10 @@ inline void Solver::varBumpActivity(Var v, double inc) {
         for (int i = 0; i < nVars(); i++)
             activity[i] *= 1e-100;
         var_inc *= 1e-100;
+
+        // partial order may have changed, so we simply rebuild the whole heap
+        rebuildOrderHeap();
+        return;
     }
 
     // Update order_heap with respect to new activity:
@@ -531,15 +609,6 @@ inline int Solver::nFreeVars() const {
     return (int)dec_vars -
            (trail_lim.size() == 0 ? trail.size() : trail_lim[0].lit);
 }
-inline void Solver::setDecisionVar(Var v, bool b) {
-    if (b && !decision[v])
-        dec_vars++;
-    else if (!b && decision[v])
-        dec_vars--;
-
-    decision[v] = b;
-    insertVarOrder(v);
-}
 inline void Solver::setConfBudget(int64_t x) {
     conflict_budget = conflicts + x;
 }
@@ -629,10 +698,15 @@ inline void Solver::toDimacs(const char* file, Lit p, Lit q, Lit r) {
 }
 
 bool Solver::VarOrderLt::operator()(Var x, Var y) const {
-    auto&& act = m_solver->activity;
-    return act[x] > act[y] + eps ||
-           (act[x] > act[y] - eps &&
-            m_solver->var_preference[x] < m_solver->var_preference[y]);
+    auto ax = m_solver->activity[x], ay = m_solver->activity[y];
+    if (ax > ay + eps) {
+        return true;
+    }
+    if (ax > ay - eps) {
+        int px = m_solver->var_preference[x], py = m_solver->var_preference[y];
+        return px < py || (px == py && x > y);
+    }
+    return false;
 }
 
 //=================================================================================================

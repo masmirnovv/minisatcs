@@ -21,6 +21,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #include "minisat/mtl/Sort.h"
 #include "minisat/simp/SimpSolver.h"
 #include "minisat/utils/System.h"
+#include "minisat/utils/Options.h"
 
 using namespace Minisat;
 
@@ -65,6 +66,7 @@ SimpSolver::SimpSolver() :
     ca.extra_clause_field = true; // NOTE: must happen before allocating the dummy clause below.
     bwdsub_tmpunit        = ca.alloc(dummy);
     remove_satisfied      = false;
+    dead_var_remover.disable();
 }
 
 

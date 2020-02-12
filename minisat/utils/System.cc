@@ -20,6 +20,8 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 
 #include "minisat/utils/System.h"
 
+#include <stdexcept>
+
 #if defined(__linux__)
 
 #include <stdio.h>
@@ -68,7 +70,7 @@ static inline int memReadPeak(void)
 }
 
 double Minisat::memUsed() { return (double)memReadStat(0) * (double)getpagesize() / (1024*1024); }
-double Minisat::memUsedPeak() { 
+double Minisat::memUsedPeak() {
     double peak = memReadPeak() / 1024;
     return peak == 0 ? memUsed() : peak; }
 
@@ -80,7 +82,6 @@ double Minisat::memUsed(void) {
     return (double)ru.ru_maxrss / 1024; }
 double MiniSat::memUsedPeak(void) { return memUsed(); }
 
-
 #elif defined(__APPLE__)
 #include <malloc/malloc.h>
 
@@ -90,6 +91,47 @@ double Minisat::memUsed(void) {
     return (double)t.max_size_in_use / (1024*1024); }
 
 #else
-double Minisat::memUsed() { 
+double Minisat::memUsed() {
     return 0; }
 #endif
+
+std::optional<std::string> Minisat::str_printf_va(const char* fmt,
+                                                  va_list uap) {
+    va_list ap;
+
+    va_copy(ap, uap);
+    char tmp;
+    int size = vsnprintf(&tmp, 0, fmt, ap);
+    va_end(ap);
+
+    if (size < 0) {
+        return std::nullopt;
+    }
+
+    size++; /* For '\0' */
+    std::string ret;
+    ret.resize(size);
+    ret[size] = 0;
+
+    va_copy(ap, uap);
+    size = vsnprintf(ret.data(), size, fmt, ap);
+    va_end(ap);
+
+    if (size < 0) {
+        return std::nullopt;
+    }
+
+    return ret;
+}
+
+void Minisat::uassert_failed(const char* fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    auto msg = str_printf_va(fmt, ap);
+    va_end(ap);
+    if (msg.has_value()) {
+        throw std::runtime_error{std::move(msg.value())};
+    }
+    throw std::runtime_error{"failed to format error message"};
+}
+

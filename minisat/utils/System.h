@@ -26,6 +26,9 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #endif
 
 #include "minisat/mtl/IntTypes.h"
+#include <string>
+#include <cstdarg>
+#include <optional>
 
 //-------------------------------------------------------------------------------------------------
 
@@ -35,7 +38,19 @@ static inline double cpuTime(void); // CPU-time in seconds.
 extern double memUsed();            // Memory in mega bytes (returns 0 for unsupported architectures).
 extern double memUsedPeak();        // Peak-memory in mega bytes (returns 0 for unsupported architectures).
 
+std::optional<std::string> str_printf_va(const char* fmt, va_list ap);
+[[noreturn]] void uassert_failed(const char* fmt, ...)
+        __attribute__((format(printf, 1, 2)));
 }
+
+//! user assert: check user inputs, and raise exception with readable message if
+//! failed
+#define minisat_uassert(expr, msg...)       \
+    do {                                    \
+        if (!(expr)) {                      \
+            ::Minisat::uassert_failed(msg); \
+        }                                   \
+    } while (0)
 
 //-------------------------------------------------------------------------------------------------
 // Implementation of inline functions:

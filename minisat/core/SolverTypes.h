@@ -105,9 +105,11 @@ static constexpr Lit lit_Error = {-1};  // }
 struct lbool_true_type {};
 struct lbool_false_type {};
 struct lbool_undef_type {};
-#define l_True (::Minisat::lbool_true_type{})
-#define l_False (::Minisat::lbool_false_type{})
-#define l_Undef (::Minisat::lbool_undef_type{})
+struct lbool_invalid_type {};
+static constexpr lbool_true_type l_True;
+static constexpr lbool_false_type l_False;
+static constexpr lbool_undef_type l_Undef;
+static constexpr lbool_invalid_type l_Invalid;
 
 class lbool {
     uint8_t value;
@@ -120,6 +122,7 @@ public:
     constexpr lbool(lbool_true_type) : lbool(true) {}
     constexpr lbool(lbool_false_type) : lbool(false) {}
     constexpr lbool(lbool_undef_type) : lbool(static_cast<uint8_t>(2)) {}
+    constexpr lbool(lbool_invalid_type) : lbool(static_cast<uint8_t>(4)) {}
 
     template <typename T>
     lbool(T) = delete;
@@ -129,6 +132,7 @@ public:
     constexpr bool operator==(lbool_true_type) const { return value == 0; }
     constexpr bool operator==(lbool_false_type) const { return value == 1; }
     constexpr bool operator==(lbool_undef_type) const { return value & 2; }
+    constexpr bool operator==(lbool_invalid_type) const { return value & 4; }
     template <typename T>
     constexpr bool operator!=(T t) const {
         return !operator==(t);
@@ -147,9 +151,8 @@ public:
         return value == (static_cast<uint8_t>(b) ^ 1);
     }
 
-
     bool as_bool() const {
-        assert(!(value & 2));
+        assert(!(value & 6));
         return value == 0;
     }
 
@@ -290,6 +293,14 @@ public:
     }
     void pop() { shrink(1); }
 
+    void shrink_leq_to(int new_size, int new_bound) {
+        assert(header.is_leq && !header.has_extra);
+        data[new_size] = data[header.size];
+        data[new_size + 1].leq_bound = new_bound;
+        data[new_size + 2] = data[header.size + 2];
+        header.size = new_size;
+    }
+
     bool learnt() const { return header.learnt; }
     bool is_leq() const { return header.is_leq; }
     Lit leq_dst() const { return data[header.size].lit; }
@@ -299,7 +310,12 @@ public:
     bool has_extra() const { return header.has_extra; }
     uint32_t mark() const { return header.mark; }
     void mark(uint32_t m) { header.mark = m; }
-    const Lit& last() const { return data[header.size - 1].lit; }
+    Lit last() const { return data[header.size - 1].lit; }
+
+    const Lit* lit_data() const {
+        static_assert(sizeof(Data) == sizeof(Lit));
+        return &data[0].lit;
+    }
 
     bool reloced() const { return header.reloced; }
     CRef relocation() const { return data[0].rel; }
@@ -439,19 +455,26 @@ public:
 };
 
 //=================================================================================================
-// OccLists -- a class for maintaining occurence lists with lazy deletion:
-
-template <class Idx, class Vec, class Deleted>
+/*!
+ * a class for maintaining occurence lists with lazy deletion
+ *
+ * \tparam Refresh: a functor class to refresh the watchers; it can modify
+ *      watchers in place. Return true if a watcher should be removed.
+ */
+template <class Idx, class Vec, class Refresh>
 class OccLists {
     std::vector<Vec> m_occs;
     vec<bool> m_dirty;
     vec<Idx> m_dirties;
-    Deleted m_deleted;
+    Refresh m_refresh;
+
+    //! refresh dirty watches and remove deleted items in the list of idx
+    void clean(const Idx& idx);
 
 public:
     template <typename... Args>
     explicit OccLists(Args&&... args)
-            : m_deleted{std::forward<Args>(args)...} {}
+            : m_refresh{std::forward<Args>(args)...} {}
 
     void init(const Idx& idx) {
         size_t size = toInt(idx) + 1;
@@ -471,9 +494,9 @@ public:
         return m_occs[toInt(idx)];
     }
 
-    //! remove deleted items in the list of idx
-    void clean(const Idx& idx);
     void cleanAll();
+
+    //! mark that watchers in a given index should be refreshed
     void smudge(const Idx& idx) {
         if (m_dirty[toInt(idx)] == 0) {
             m_dirty[toInt(idx)] = 1;
@@ -493,8 +516,8 @@ public:
     }
 };
 
-template <class Idx, class Vec, class Deleted>
-void OccLists<Idx, Vec, Deleted>::cleanAll() {
+template <class Idx, class Vec, class Refresh>
+void OccLists<Idx, Vec, Refresh>::cleanAll() {
     for (Idx i : m_dirties) {
         // Dirties may contain duplicates so check here if a variable is already
         // cleaned:
@@ -505,12 +528,12 @@ void OccLists<Idx, Vec, Deleted>::cleanAll() {
     m_dirties.clear();
 }
 
-template <class Idx, class Vec, class Deleted>
-void OccLists<Idx, Vec, Deleted>::clean(const Idx& idx) {
+template <class Idx, class Vec, class Refresh>
+void OccLists<Idx, Vec, Refresh>::clean(const Idx& idx) {
     Vec& vec = m_occs[toInt(idx)];
     int i, j;
     for (i = j = 0; i < vec.size(); i++) {
-        if (!m_deleted(vec[i])) {
+        if (!m_refresh(vec[i])) {
             vec[j++] = vec[i];
         }
     }

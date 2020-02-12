@@ -74,6 +74,7 @@ public:
 
     // Pointer to first element:
     operator T*(void) { return m_data; }
+    T* data() { return m_data; }
     T* begin() { return m_data; }
     T* end() { return m_data + m_sz; }
 
