@@ -93,6 +93,8 @@ static void parse_DIMACS_main(B& in, Solver& S) {
     int vars = 0;
     int clauses = 0;
     int cnt = 0;
+    size_t cmdlen;
+    char cmd[6];
     for (;;) {
         skipWhitespace(in);
         switch (*in) {
@@ -121,15 +123,33 @@ static void parse_DIMACS_main(B& in, Solver& S) {
                 }
                 break;
             case 'c':
-                if (eagerMatch(in, "c vpref")) {
+                ++in;
+                skipWhitespace(in);
+                cmdlen = 0;
+                while (*in != ' ' && *in != '\n' && cmdlen < sizeof(cmd) - 1) {
+                    cmd[cmdlen++] = *in;
+                    ++in;
+                }
+                cmd[cmdlen] = 0;
+                if (!strcmp(cmd, "vpref")) {
                     for (;;) {
                         int lit = parseInt(in);
                         if (!lit) {
                             break;
                         }
                         int pref = parseInt(in);
-                        S.setVarPreference(lit, pref);
+                        S.setVarPreference(std::abs(lit) - 1, pref);
                     }
+                } else if (!strcmp(cmd, "vname")) {
+                    int lit = parseInt(in);
+                    std::string name;
+                    skipWhitespace(in);
+                    while (*in != '\n') {
+                        name.append(1, *in);
+                        ++in;
+                    }
+                    ++in;
+                    S.var_names[std::abs(lit) - 1] = std::move(name);
                 } else {
                     skipLine(in);
                 }
