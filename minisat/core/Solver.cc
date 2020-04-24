@@ -1658,7 +1658,7 @@ lbool Solver::solve_() {
         printf("|  Number of variables:  %12d                                  "
                "       |\n",
                nVars());
-        printf("|  Number of clauses:    %12d/%d                               "
+        printf("|  Number of clauses:    %12d/%-12d                     "
                "       |\n",
                nClauses(), nLeqClauses());
         int nr_pref = 0;
@@ -1674,9 +1674,21 @@ lbool Solver::solve_() {
     {
         bool simplify_result = simplify();
         if (verbosity > 0) {
-            printf("|  Simplified: (result=%d)%12d/%d                          "
-                   "            |\n",
+            printf("|  Simplified: (result=%d)%12d/%-12d                     "
+                    "       |\n",
                    simplify_result, nClauses(), nLeqClauses());
+            int max_leq_bound = 0;
+            for (CRef i : clauses) {
+                if (ca[i].is_leq()) {
+                    int bound0 = ca[i].leq_bound(),
+                        bound1 = ca[i].size() - bound0;
+                    max_leq_bound =
+                            std::max(max_leq_bound, std::min(bound0, bound1));
+                }
+            }
+            printf("|  Max LEQ bound:        %12d                              "
+                   "           |\n",
+                   max_leq_bound);
         }
         if (!simplify_result) {
             return l_False;
