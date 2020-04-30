@@ -471,7 +471,8 @@ protected:
     //! Move lits with known values matching target value to the beginning, and
     //! enqueue unknown lits to be the opposite;
     //! If the number of known vars is greater than nr_known, revert all
-    //! enqueued values and return false.
+    //! enqueued values and return false. This happens when enqueued lits have
+    //! not been processed to update the stats
     template <bool sel_true>
     bool select_known_and_imply_unknown(CRef cr, Clause& c, int nr_known);
 

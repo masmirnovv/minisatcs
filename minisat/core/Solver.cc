@@ -1210,6 +1210,14 @@ CRef Solver::propagate_leq(Lit new_fact) {
         CRef cref = watch.cref;
         Clause& c = ca[cref];
         assert(c.is_leq());
+
+        if (c.mark() == 1) {
+            // The clause has been removed, but not reclaimed. This happens
+            // during simplyfication
+            assert(decisionLevel() == 0);
+            continue;
+        }
+
         Lit dst = c.leq_dst();
         if (lbool dst_val = value(dst); dst_val.is_not_undef()) {
             // truth value of the LEQ is known, and we can try to imply lits
@@ -1282,8 +1290,8 @@ CRef Solver::propagate_leq(Lit new_fact) {
 
 template <bool sel_true>
 void Solver::select_known_lits(Clause& c, int num) {
-    int size = c.size();
-    for (int i = 0, j = num; i < num;) {
+    int size = c.size(), i = 0;
+    for (int j = num; i < num;) {
         if (value(c[i]).is_bool<sel_true>()) {
             ++i;
         } else {
@@ -1298,6 +1306,7 @@ void Solver::select_known_lits(Clause& c, int num) {
             ++j;
         }
     }
+    assert(i == num);
 }
 
 template <bool sel_true>
@@ -1675,7 +1684,7 @@ lbool Solver::solve_() {
         bool simplify_result = simplify();
         if (verbosity > 0) {
             printf("|  Simplified: (result=%d)%12d/%-12d                     "
-                    "       |\n",
+                   "       |\n",
                    simplify_result, nClauses(), nLeqClauses());
             int max_leq_bound = 0;
             for (CRef i : clauses) {
@@ -1908,3 +1917,5 @@ int Solver::nLeqClauses() const {
     }
     return ret;
 }
+
+// vim: tw=80
