@@ -31,6 +31,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 using namespace Minisat;
 
+#define MARK_USED(x) static_cast<void>(x)
+
 #if 0
 #define DEBUG_PRINTF printf
 #else
@@ -190,8 +192,7 @@ void DeadVarRemover::remove_clause_and_decr_refcnt(Var src_var, CRef cref) {
     }
     RefCnt* ptr = m_var_refcnt.data();
     if (c.is_leq()) {
-        Var v = var(c.leq_dst());
-        assert(v == src_var);
+        assert(var(c.leq_dst()) == src_var);
 
         m_leq_to_fix.emplace_back();
         auto&& dst = m_leq_to_fix.back();
@@ -1292,6 +1293,7 @@ CRef Solver::propagate_leq(Lit new_fact) {
 template <bool sel_true>
 void Solver::select_known_lits(Clause& c, int num) {
     int size = c.size(), i = 0;
+    MARK_USED(size);
     for (int j = num; i < num;) {
         if (value(c[i]).is_bool<sel_true>()) {
             ++i;
