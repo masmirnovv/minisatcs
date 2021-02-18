@@ -18,10 +18,15 @@ Run `make test` to run the test cases.
 
 If this project is helpful to your research, please cite our paper:
 ```txt
-@article{jia2020efficient,
-  title={Efficient Exact Verification of Binarized Neural Networks},
-  author={Jia, Kai and Rinard, Martin},
-  journal={arXiv preprint arXiv:2005.03597},
-  year={2020}
+@inproceedings{jia2020efficient,
+ author = {Jia, Kai and Rinard, Martin},
+ booktitle = {Advances in Neural Information Processing Systems},
+ editor = {H. Larochelle and M. Ranzato and R. Hadsell and M. F. Balcan and H. Lin},
+ pages = {1782--1795},
+ publisher = {Curran Associates, Inc.},
+ title = {Efficient Exact Verification of Binarized Neural Networks},
+ url = {https://proceedings.neurips.cc/paper/2020/file/1385974ed5904a438616ff7bdb3f7439-Paper.pdf},
+ volume = {33},
+ year = {2020}
 }
 ```
