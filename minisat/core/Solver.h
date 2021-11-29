@@ -29,6 +29,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "minisat/mtl/Vec.h"
 #include "minisat/utils/Random.h"
 
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
