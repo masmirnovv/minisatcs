@@ -29,7 +29,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <cmath>
 #include <stdexcept>
 
-using namespace Minisat;
+using namespace MinisatCS;
 
 #define MARK_USED(x) static_cast<void>(x)
 

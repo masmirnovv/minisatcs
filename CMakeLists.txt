@@ -65,6 +65,9 @@ set_target_properties(libminisat
 
         # build PIC binary so .a could be linked into a shared library
         POSITION_INDEPENDENT_CODE ON
+
+        # do not expose internal APIs by default
+        CXX_VISIBILITY_PRESET hidden
 )
 
 ## Add a namespace alias.

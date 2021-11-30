@@ -32,7 +32,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 
 //-------------------------------------------------------------------------------------------------
 
-namespace Minisat {
+namespace MinisatCS {
 
 static inline double cpuTime(void); // CPU-time in seconds.
 extern double memUsed();            // Memory in mega bytes (returns 0 for unsupported architectures).
@@ -48,7 +48,7 @@ std::optional<std::string> str_printf_va(const char* fmt, va_list ap);
 #define minisat_uassert(expr, msg...)       \
     do {                                    \
         if (!(expr)) {                      \
-            ::Minisat::uassert_failed(msg); \
+            ::MinisatCS::uassert_failed(msg); \
         }                                   \
     } while (0)
 
@@ -58,14 +58,14 @@ std::optional<std::string> str_printf_va(const char* fmt, va_list ap);
 #if defined(_MSC_VER) || defined(__MINGW32__)
 #include <time.h>
 
-static inline double Minisat::cpuTime(void) { return (double)clock() / CLOCKS_PER_SEC; }
+static inline double MinisatCS::cpuTime(void) { return (double)clock() / CLOCKS_PER_SEC; }
 
 #else
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <unistd.h>
 
-static inline double Minisat::cpuTime(void) {
+static inline double MinisatCS::cpuTime(void) {
     struct rusage ru;
     getrusage(RUSAGE_SELF, &ru);
     return (double)ru.ru_utime.tv_sec + (double)ru.ru_utime.tv_usec / 1000000; }

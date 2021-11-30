@@ -29,7 +29,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #include "minisat/core/Dimacs.h"
 #include "minisat/core/Solver.h"
 
-using namespace Minisat;
+using namespace MinisatCS;
 
 static const char* MSG_UNSAT = "r=UNSAT";
 static const char* MSG_SAT = "r=SAT";

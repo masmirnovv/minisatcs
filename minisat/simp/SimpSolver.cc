@@ -23,7 +23,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #include "minisat/utils/System.h"
 #include "minisat/utils/Options.h"
 
-using namespace Minisat;
+using namespace MinisatCS;
 
 //=================================================================================================
 // Options:

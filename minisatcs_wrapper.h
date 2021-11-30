@@ -10,13 +10,13 @@
 #include <thread>
 #include <vector>
 
-class MinisatClauseRecorder : public Minisat::ClauseRecorder {
+class MinisatClauseRecorder : public MinisatCS::ClauseRecorder {
 public:
     // concrete solver type
-    void replay(Minisat::Solver& solver) { ClauseRecorder::replay(solver); }
+    void replay(MinisatCS::Solver& solver) { ClauseRecorder::replay(solver); }
 };
 
-class WrappedMinisatSolver : public Minisat::Solver {
+class WrappedMinisatSolver : public MinisatCS::Solver {
     MinisatClauseRecorder* m_recorder = nullptr;
 
     class ScopedSolverAssign {
@@ -42,11 +42,11 @@ class WrappedMinisatSolver : public Minisat::Solver {
         m_new_clause_max_var = 0;
     }
 
-    Minisat::Lit make_lit(int lit) {
+    MinisatCS::Lit make_lit(int lit) {
         assert(lit != 0);
         int lv = std::abs(lit);
         m_new_clause_max_var = std::max(m_new_clause_max_var, lv);
-        return Minisat::mkLit(lv - 1, lit < 0);
+        return MinisatCS::mkLit(lv - 1, lit < 0);
     }
 
 public:
@@ -108,9 +108,9 @@ public:
     std::vector<int> get_model() const {
         std::vector<int> ret;
         for (int i = 0; i < model.size(); ++i) {
-            if (model[i] == Minisat::l_True) {
+            if (model[i] == MinisatCS::l_True) {
                 ret.push_back(i + 1);
-            } else if (model[i] == Minisat::l_False) {
+            } else if (model[i] == MinisatCS::l_False) {
                 ret.push_back(-i - 1);
             }
         }

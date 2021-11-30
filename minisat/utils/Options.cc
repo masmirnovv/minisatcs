@@ -21,9 +21,9 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #include "minisat/utils/Options.h"
 #include "minisat/utils/ParseUtils.h"
 
-using namespace Minisat;
+using namespace MinisatCS;
 
-void Minisat::parseOptions(int& argc, char** argv, bool strict)
+void MinisatCS::parseOptions(int& argc, char** argv, bool strict)
 {
     int i, j;
     for (i = j = 1; i < argc; i++){
@@ -60,9 +60,9 @@ void Minisat::parseOptions(int& argc, char** argv, bool strict)
 }
 
 
-void Minisat::setUsageHelp      (const char* str){ Option::getUsageString() = str; }
-void Minisat::setHelpPrefixStr  (const char* str){ Option::getHelpPrefixString() = str; }
-void Minisat::printUsageAndExit (int /*argc*/, char** argv, bool verbose)
+void MinisatCS::setUsageHelp      (const char* str){ Option::getUsageString() = str; }
+void MinisatCS::setHelpPrefixStr  (const char* str){ Option::getHelpPrefixString() = str; }
+void MinisatCS::printUsageAndExit (int /*argc*/, char** argv, bool verbose)
 {
     const char* usage = Option::getUsageString();
     if (usage != NULL)

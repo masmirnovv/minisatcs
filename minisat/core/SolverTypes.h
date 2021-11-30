@@ -32,7 +32,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "minisat/mtl/IntTypes.h"
 #include "minisat/mtl/Vec.h"
 
-namespace Minisat {
+namespace MinisatCS {
 
 //=================================================================================================
 // Variables, literals, lifted booleans, clauses:
@@ -594,6 +594,6 @@ inline void Clause::strengthen(Lit p) {
 }
 
 //=================================================================================================
-}  // namespace Minisat
+}  // namespace MinisatCS
 
 #endif

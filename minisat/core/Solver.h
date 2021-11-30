@@ -34,7 +34,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <unordered_map>
 #include <utility>
 
-namespace Minisat {
+namespace MinisatCS {
 
 //=================================================================================================
 // Solver -- the main class:
@@ -715,6 +715,6 @@ bool Solver::VarOrderLt::operator()(Var x, Var y) const {
 // Debug etc:
 
 //=================================================================================================
-}  // namespace Minisat
+}  // namespace MinisatCS
 
 #endif

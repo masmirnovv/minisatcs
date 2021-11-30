@@ -23,12 +23,14 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #ifndef Minisat_Dimacs_h
 #define Minisat_Dimacs_h
 
-#include <stdio.h>
+#include <cstdio>
+#include <cstring>
+#include <string>
 
 #include "minisat/core/SolverTypes.h"
 #include "minisat/utils/ParseUtils.h"
 
-namespace Minisat {
+namespace MinisatCS {
 
 //=================================================================================================
 // DIMACS Parser:
@@ -172,6 +174,6 @@ static void parse_DIMACS(gzFile input_stream, Solver& S) {
 }
 
 //=================================================================================================
-}  // namespace Minisat
+}  // namespace MinisatCS
 
 #endif

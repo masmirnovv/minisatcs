@@ -32,7 +32,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "minisat/mtl/IntTypes.h"
 #include "minisat/mtl/XAlloc.h"
 
-namespace Minisat {
+namespace MinisatCS {
 
 //=================================================================================================
 // Automatically resizable arrays
@@ -194,6 +194,6 @@ void vec<T>::clear(bool dealloc) {
 }
 
 //=================================================================================================
-}  // namespace Minisat
+}  // namespace MinisatCS
 
 #endif

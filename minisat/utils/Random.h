@@ -29,7 +29,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <limits>
 #include <random>
 
-namespace Minisat {
+namespace MinisatCS {
 // see
 // https://lemire.me/blog/2019/03/19/the-fastest-conventional-random-number-generator-that-can-pass-big-crush/
 class RandomState {
@@ -61,5 +61,5 @@ public:
         return std::min<int>(uniform() * upper, upper - 1);
     }
 };
-}  // namespace Minisat
+}  // namespace MinisatCS
 

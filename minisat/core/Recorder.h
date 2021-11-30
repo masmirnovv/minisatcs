@@ -26,7 +26,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <unordered_map>
 #include "minisat/core/SolverTypes.h"
 
-namespace Minisat {
+namespace MinisatCS {
 
 //! record and rebuild clauses to cache part of a problem
 class ClauseRecorder {
@@ -113,4 +113,4 @@ public:
     //! number of recorded vars
     int nr_var() const { return m_nr_var; }
 };
-}  // namespace Minisat
+}  // namespace MinisatCS
