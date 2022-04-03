@@ -119,7 +119,7 @@ public:
 
     //! return -1 for timeout, 0 for unsat, 1 for sat. set timeout < 0 to
     //! disable
-    inline int solve_with_signal(bool setup, double timeout);
+    inline int solve_with_signal(bool setup, const std::vector<int>& assumps, double timeout);
 };
 
 class WrappedMinisatSolver::Timer {
@@ -163,7 +163,7 @@ public:
     }
 };
 
-int WrappedMinisatSolver::solve_with_signal(bool setup, double timeout) {
+int WrappedMinisatSolver::solve_with_signal(bool setup, const std::vector<int>& assumps, double timeout) {
     static WrappedMinisatSolver* g_solver = nullptr;
     static auto on_sig = [](int) {
         if (g_solver) {
@@ -192,6 +192,9 @@ int WrappedMinisatSolver::solve_with_signal(bool setup, double timeout) {
     }
     budgetOff();
     assumptions.clear();
+    for (int lit : assumps) {
+        assumptions.push(make_lit(lit));
+    }
     auto ret = solve_();
     if (sigaction(SIGINT, &old_action, nullptr)) {
         char msg[1024];
