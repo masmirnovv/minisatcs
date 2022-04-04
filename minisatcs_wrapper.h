@@ -117,9 +117,13 @@ public:
         return ret;
     }
 
+    inline void set_conf_budget(int64_t budget);
+
+    inline void set_prop_budget(int64_t budget);
+
     //! return -1 for timeout, 0 for unsat, 1 for sat. set timeout < 0 to
     //! disable
-    inline int solve_with_signal(bool setup, const std::vector<int>& assumps, double timeout);
+    inline int solve_with_signal(bool setup, const std::vector<int>& assumps, double timeout, bool is_limited);
 };
 
 class WrappedMinisatSolver::Timer {
@@ -163,7 +167,15 @@ public:
     }
 };
 
-int WrappedMinisatSolver::solve_with_signal(bool setup, const std::vector<int>& assumps, double timeout) {
+void WrappedMinisatSolver::set_conf_budget(int64_t budget) {
+    setConfBudget(budget)
+}
+
+void WrappedMinisatSolver::set_prop_budget(int64_t budget) {
+    setPropBudget(budget)
+}
+
+int WrappedMinisatSolver::solve_with_signal(bool setup, const std::vector<int>& assumps, double timeout, bool is_limited) {
     static WrappedMinisatSolver* g_solver = nullptr;
     static auto on_sig = [](int) {
         if (g_solver) {
@@ -190,7 +202,9 @@ int WrappedMinisatSolver::solve_with_signal(bool setup, const std::vector<int>& 
             throw std::runtime_error{msg};
         }
     }
-    budgetOff();
+    if (!is_limited) {
+        budgetOff();
+    }
     assumptions.clear();
     for (int lit : assumps) {
         assumptions.push(make_lit(lit));
