@@ -168,11 +168,11 @@ public:
 };
 
 void WrappedMinisatSolver::set_conf_budget(int64_t budget) {
-    setConfBudget(budget)
+    setConfBudget(budget);
 }
 
 void WrappedMinisatSolver::set_prop_budget(int64_t budget) {
-    setPropBudget(budget)
+    setPropBudget(budget);
 }
 
 int WrappedMinisatSolver::solve_with_signal(bool setup, const std::vector<int>& assumps, double timeout, bool is_limited) {
