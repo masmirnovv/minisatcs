@@ -225,7 +225,7 @@ int WrappedMinisatSolver::solve_with_signal(bool setup, const std::vector<int>& 
         throw std::runtime_error{msg};
     }
 
-    if (is_tle) {
+    if (is_tle || !withinBudget()) {
         return -1;
     }
 
