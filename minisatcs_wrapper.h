@@ -225,16 +225,10 @@ int WrappedMinisatSolver::solve_with_signal(bool setup, const std::vector<int>& 
         throw std::runtime_error{msg};
     }
 
-    if (is_tle ||
-            (conflict_budget > 0 && conflicts >= conflict_budget) ||
-            (propagation_budget > 0 && propagations >= propagation_budget)) {
-        return -1;
-    }
-
     if (ret.is_not_undef()) {
         return ret.as_bool();
+    } else {
+        return -1;
     }
-
-    throw std::runtime_error("computation interrupted");
 }
 
